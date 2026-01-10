@@ -1,6 +1,11 @@
 @echo off
+REM ========================================
+REM PARKOMFY - Smart Parking Management
+REM Build and Run Script
+REM ========================================
+echo.
 echo ====================================
-echo PARKOMFY Application Starting...
+echo PARKOMFY Application Launcher
 echo ====================================
 echo.
 
@@ -13,10 +18,43 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Compile Java files
-echo Compiling Java files...
+REM Create output directory if it doesn't exist
 if not exist out mkdir out
-javac -d out -encoding UTF-8 src\main\java\com\parkomfy\model\*.java src\main\java\com\parkomfy\service\*.java src\main\java\com\parkomfy\repository\*.java src\main\java\com\parkomfy\gui\*.java src\main\java\com\parkomfy\*.java
+
+REM Compile all Java files
+echo Compiling Java source files...
+javac -d out -encoding UTF-8 ^
+    src/main/java/com/parkomfy/*.java ^
+    src/main/java/com/parkomfy/model/*.java ^
+    src/main/java/com/parkomfy/service/*.java ^
+    src/main/java/com/parkomfy/repository/*.java ^
+    src/main/java/com/parkomfy/api/*.java ^
+    src/main/java/com/parkomfy/controller/*.java ^
+    src/main/java/com/parkomfy/ai/*.java ^
+    src/main/java/com/parkomfy/ocr/*.java ^
+    src/main/java/com/parkomfy/gui/*.java ^
+    2>&1
+
+if %errorlevel% neq 0 (
+    echo.
+    echo ERROR: Compilation failed!
+    echo Please check the error messages above
+    pause
+    exit /b 1
+)
+
+echo.
+echo Compilation successful!
+echo.
+echo ====================================
+echo Running PARKOMFY Application Demo
+echo ====================================
+echo.
+
+REM Run the demo application
+java -cp out com.parkomfy.ParkomfyDemo
+
+pause
 
 if %errorlevel% neq 0 (
     echo ERROR: Compilation failed

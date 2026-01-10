@@ -1,19 +1,19 @@
 # 🅿️ PARKOMFY - Smart Parking Management System
 
-## 📋 Proje Açıklaması
+## 📋 Project Description
 
-PARKOMFY, mevcut güvenlik kameralarını kullanarak YOLO algoritması ile **gerçek zamanlı park yeri doluluk tespiti** yapan ve **plaka tanıma (OCR)** özelliği sunan akıllı park yönetim sistemidir.
+PARKOMFY is an intelligent parking management system that performs **real-time parking occupancy detection** using YOLO algorithm through existing security cameras and provides **License Plate Recognition** capabilities.
 
-Modern Java teknolojileri ile geliştirilmiş, **Spring Boot REST API**, **gRPC** ve **microservices** mimarisi kullanılarak oluşturulmuş bir sistemdir.
+Developed with modern Java technologies, built using **Spring Boot REST API**, **gRPC**, and **microservices** architecture.
 
 ---
 
-## ✨ Proje Durumu (v1.0 - Backend Ready)
+## ✨ Project Status (v1.0 - Backend Ready)
 
-### ✅ Tamamlanan Bölümler:
+### ✅ Completed Components:
 - ✅ **Backend Services** - ParkingService, PaymentService, DetectionService
-- ✅ **REST API** - 7 endpoint, Spring Boot implementation
-- ✅ **Service Layer** - Interface-based architecture + Dependency Injection
+- ✅ **REST API** - 7 endpoints, Spring Boot implementation
+- ✅ **Service Layer** - Interface-based architecture with Dependency Injection
 - ✅ **DTO Classes** - API response wrappers
 - ✅ **Model Layer** - 11 domain classes, OOP standards
 - ✅ **Repository Pattern** - DatabaseManager with MySQL interface
@@ -22,13 +22,13 @@ Modern Java teknolojileri ile geliştirilmiş, **Spring Boot REST API**, **gRPC*
 - ✅ **Compilation** - 36 Java files, 0 errors
 - ✅ **Testing** - ParkomfyDemo full workflow test passing
 
-### ⚠️ Hazırlanıyor:
-- 🔄 **MySQL Database** - Integration ready (connection string needs MySQL server)
+### ⚠️ In Progress:
+- 🔄 **MySQL Database** - Integration ready (connection requires MySQL server)
 - 🔄 **Python YOLO Server** - gRPC infrastructure ready (model loading pending)
 - 🔄 **Stripe Integration** - PaymentService ready (real API key needed)
 - 🔄 **Mobile App** - REST endpoints fully prepared
 
-### ❌ Yapılacak:
+### ❌ Future Work:
 - 📌 Real YOLO model deployment
 - 📌 Mobile client application
 - 📌 Authentication/JWT
@@ -37,7 +37,7 @@ Modern Java teknolojileri ile geliştirilmiş, **Spring Boot REST API**, **gRPC*
 
 ---
 
-## 🏗️ Mimari Yapı (Architecture)
+## 🏗️ Architecture Overview
 
 ### Three-Layer Architecture + Dependency Injection
 
@@ -100,7 +100,7 @@ Modern Java teknolojileri ile geliştirilmiş, **Spring Boot REST API**, **gRPC*
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Project Structure
 
 ```
 src/main/java/com/parkomfy/
@@ -163,21 +163,21 @@ src/main/proto/
 
 ---
 
-## 🎯 OOP Yapısı (Object-Oriented Principles)
+## 🎯 Object-Oriented Design Principles
 
-### 1. Encapsulation (Kapsülleme)
+### 1. Encapsulation
 ```java
-// ✅ Tüm fields private
+// ✅ All fields are private
 private String sessionId;
 private Vehicle vehicle;
 private LocalDateTime entryTime;
 
-// ✅ Getter/Setter ile kontrollü erişim
+// ✅ Controlled access through getters/setters
 public String getSessionId() { return sessionId; }
 public void setExitTime(LocalDateTime exitTime) { this.exitTime = exitTime; }
 ```
 
-### 2. Inheritance & Polymorphism (Kalıtım & Çok Biçimlilik)
+### 2. Inheritance & Polymorphism
 ```java
 // ✅ Interface-based design
 public interface IParkingService {
@@ -192,7 +192,7 @@ public class ParkingService implements IParkingService {
 }
 ```
 
-### 3. Abstraction (Soyutlama)
+### 3. Abstraction
 ```java
 // ✅ Repository pattern - database logic abstracted
 public interface IParkingRepository {
@@ -206,60 +206,67 @@ public interface IDetectionService {
 ```
 
 ### 4. Single Responsibility Principle
-- **ParkingService:** Only parking logic
+- **ParkingService:** Only parking management logic
 - **PaymentService:** Only payment processing
 - **DetectionService:** Only AI detection orchestration
-- **DatabaseManager:** Only data access
+- **DatabaseManager:** Only data access operations
 
 ---
 
-## 🚀 REST API Endpoints (7 Tamamlandı)
+## 🚀 REST API Endpoints (7 Completed)
 
 ### 1. Parking Status
 ```http
 GET /api/v1/parking/status?areaId=AREA-001
 ```
+Returns real-time occupancy information for a parking area.
 
 ### 2. Create Parking Session
 ```http
 POST /api/v1/parking/sessions
 ```
+Initiates a new parking session when vehicle enters.
 
 ### 3. Get Session Details
 ```http
 GET /api/v1/parking/sessions/{sessionId}
 ```
+Retrieves detailed information about a specific parking session.
 
 ### 4. Exit Parking
 ```http
 POST /api/v1/parking/sessions/{sessionId}/exit
 ```
+Completes parking session and calculates parking fee.
 
 ### 5. Available Slots
 ```http
 GET /api/v1/parking/slots/available?areaId=AREA-001
 ```
+Lists all available parking slots in a specific area.
 
 ### 6. Process Payment
 ```http
 POST /api/v1/payments
 ```
+Processes payment through Stripe or other payment methods.
 
 ### 7. Health Check
 ```http
 GET /api/v1/health
 ```
+Verifies system health and API availability.
 
 ---
 
-## 💻 Kullanım
+## 💻 Usage
 
-### 1. Demo Uygulamasını Çalıştır
+### 1. Run Demo Application
 ```bash
 java -cp target/classes com.parkomfy.ParkomfyDemo
 ```
 
-Output:
+Expected Output:
 ```
 ✅ 1️⃣ INITIAL PARKING AREA STATUS
 ✅ 2️⃣ VEHICLE ENTRY - LICENSE PLATE RECOGNITION
@@ -272,25 +279,25 @@ Output:
 ✅ Demo completed successfully!
 ```
 
-### 2. Spring Boot Server
+### 2. Start Spring Boot Server
 ```bash
 java -cp target/classes com.parkomfy.ParkomfySpringApplication
 ```
 
-REST API test:
+Test REST API:
 ```powershell
 Invoke-RestMethod -Uri http://localhost:8080/api/v1/health -Method GET
 ```
 
-### 3. GUI Uygulaması
+### 3. Run GUI Application
 ```bash
 java -cp target/classes com.parkomfy.gui.ParkomfyGUI
 ```
 
-### 4. Derlemek
+### 4. Compile Project
 ```bash
 mvn clean compile
-# veya
+# or
 compile_test.bat
 ```
 
@@ -302,92 +309,93 @@ compile_test.bat
 ✅ 36 Java files compiled successfully
 ✅ 0 compilation errors
 ✅ 0 type mismatches
-✅ All imports resolved
-✅ 7819 lines of code
+✅ All imports resolved correctly
+✅ 7,819 lines of code
 ```
 
 ---
 
-## 🔧 Teknoloji Stack
+## 🔧 Technology Stack
 
-| Bileşen | Teknoloji | Durum |
-|---------|-----------|-------|
+| Component | Technology | Status |
+|-----------|-----------|--------|
 | **Language** | Java 11+ | ✅ Ready |
 | **Framework** | Spring Boot 2.x | ✅ Running |
-| **API** | REST | ✅ 7 endpoints |
+| **API** | REST/JSON | ✅ 7 endpoints |
 | **Database** | MySQL 8.0 | ⏳ Ready for connection |
 | **AI** | YOLO v8 | 🔄 gRPC infrastructure |
-| **Communication** | gRPC | ✅ Implemented |
+| **Communication** | gRPC/Protobuf | ✅ Implemented |
 | **GUI** | Swing | ✅ Demo functional |
-| **Build** | Maven | ✅ Working |
+| **Build Tool** | Maven | ✅ Working |
 
 ---
 
-## 📚 Özellikler
+## ✨ Features
 
-✅ Gerçek zamanlı park yeri doluluk tespiti
-✅ Plaka tanıma (LPR/OCR)
-✅ Otomatik fiyatlandırma
-✅ Stripe ödeme entegrasyonu (ready)
-✅ Kullanıcı yönetimi
-✅ Park oturumu takibi
-✅ REST API
+✅ Real-time parking occupancy detection
+✅ License plate recognition
+✅ Automatic fee calculation
+✅ Stripe payment integration (ready)
+✅ User management
+✅ Parking session tracking
+✅ REST API endpoints
 ✅ Spring Boot integration
 ✅ Service-oriented architecture
-✅ Dependency injection
+✅ Dependency injection pattern
 
 ---
 
-## ⚠️ Bilinen Sınırlamalar
+## ⚠️ Known Limitations
 
-1. **Database:** Şu anda simülasyon modu
-   - MySQL kurulup connection yapılandırması gerekli
+1. **Database:** Currently in simulation mode
+   - Requires MySQL server setup and connection configuration
 
 2. **YOLO Integration:** Infrastructure ready
-   - Python gRPC server gerekli
+   - Python gRPC server deployment required
 
-3. **Stripe:** Mock responses
-   - Real API key ve SDK gerekli
+3. **Stripe:** Mock responses implemented
+   - Real API key and SDK integration needed
 
-4. **Authentication:** Yok
-   - JWT/OAuth eklenmelidir
+4. **Authentication:** Not implemented
+   - JWT/OAuth needs to be added
 
 5. **Mobile App:** REST endpoints ready
-   - Client uygulaması geliştirilmelidir
+   - Client application development needed
 
 ---
 
-## 🎯 Gelecek Hedefler
+## 🎯 Future Goals
 
-- [ ] Real MySQL integration
-- [ ] Python gRPC YOLO server
-- [ ] Mobile app (iOS/Android)
-- [ ] Authentication & JWT
-- [ ] Real Stripe integration
+- [ ] Real MySQL database integration
+- [ ] Python gRPC YOLO server deployment
+- [ ] Mobile application (iOS/Android)
+- [ ] Authentication & JWT implementation
+- [ ] Real Stripe payment integration
 - [ ] Docker containerization
-- [ ] CI/CD pipeline
-- [ ] Unit & Integration tests
+- [ ] CI/CD pipeline setup
+- [ ] Unit & Integration test suite
 - [ ] Swagger API documentation
 - [ ] Kubernetes deployment
 
 ---
 
-## 🤝 Geliştirilenler
+## 👥 Development Team
 
-Özyeğin Üniversitesi CS401-402 Senior Project
+Özyeğin University CS401-402 Senior Project
 
-**Tim:**
-- Eren İsmişli
-- Kaan İlyas
-
----
-
-## 📄 Lisans
-
-Özyeğin Üniversitesi Akademik Lisansı
+**Team Members:**
+- İlyas Kaan Ayaydın
+- Yusuf Eren Erişmiş
 
 ---
 
-**Last Updated:** 2026-01-10  
+## 📄 License
+
+Özyeğin University Academic License
+
+---
+
+**Last Updated:** January 10, 2026  
 **Version:** 1.0 - Backend Services Complete  
-**Status:** ✅ All Systems Operational
+**Status:** ✅ All Systems Operational  
+**Repository:** https://github.com/erenerismis/parkomfy

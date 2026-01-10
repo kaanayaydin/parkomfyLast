@@ -1,0 +1,52 @@
+# Java
+*.class
+*.jar
+*.war
+*.nar
+*.log
+*.zip
+*.tar.gz
+*.rar
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+.classpath
+.project
+.settings/
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build
+build/
+dist/
+*.exe
+
+# Others
+*.log
+*.tmp
+.env
+.gradle/

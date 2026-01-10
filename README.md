@@ -24,7 +24,7 @@ Developed with modern Java technologies, built using **Spring Boot REST API**, *
 
 ### ⚠️ In Progress:
 - 🔄 **MySQL Database** - Integration ready (connection requires MySQL server)
-- 🔄 **Python YOLO Server** - gRPC infrastructure ready (model loading pending)
+- 🔄 **Python YOLO Server** - Communication protocol ready (gRPC connection established, model deployment pending)
 - 🔄 **Stripe Integration** - PaymentService ready (real API key needed)
 - 🔄 **Mobile App** - REST endpoints fully prepared
 
@@ -323,7 +323,7 @@ compile_test.bat
 | **Framework** | Spring Boot 2.x | ✅ Running |
 | **API** | REST/JSON | ✅ 7 endpoints |
 | **Database** | MySQL 8.0 | ⏳ Ready for connection |
-| **AI** | YOLO v8 | 🔄 gRPC infrastructure |
+| **AI** | YOLO v8 | 🔄 Communication protocol ready |
 | **Communication** | gRPC/Protobuf | ✅ Implemented |
 | **GUI** | Swing | ✅ Demo functional |
 | **Build Tool** | Maven | ✅ Working |

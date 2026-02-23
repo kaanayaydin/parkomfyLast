@@ -26,4 +26,3 @@ public interface IYOLOInference {
     /** Run detection on raw frame bytes; returns true if vehicle detected. */
     boolean processAndDetect(byte[] frameData);
 }
-

@@ -26,10 +26,10 @@ public class DetectionService implements IDetectionService {
 
     private double totalDetections = 0;
     private double correctDetections = 0;
-    
+
     /** DI: repository, YOLO impl, OCR impl. */
-    public DetectionService(IParkingRepository repository, 
-                           IYOLOInference yoloInference, 
+    public DetectionService(IParkingRepository repository,
+                           IYOLOInference yoloInference,
                            ILicensePlateReader licensePlateReader) {
         if (repository == null) {
             throw new IllegalArgumentException("Repository cannot be null");
@@ -44,17 +44,17 @@ public class DetectionService implements IDetectionService {
         this.yoloInference = yoloInference;
         this.licensePlateReader = licensePlateReader;
     }
-    
+
     /** Backward compat: default YOLO and OCR. */
     public DetectionService(IParkingRepository repository) {
         this(repository, new YOLOInference(), new LicensePlateReader());
     }
-    
+
     /** YOLO only; default license plate reader. */
     public DetectionService(IParkingRepository repository, YOLOInference yoloInference) {
         this(repository, yoloInference, new LicensePlateReader());
     }
-    
+
     /** IoU between detection box and slot. If IoU < 0.5, logs INVALID_GEOMETRY and returns false. */
     public boolean isValidGeometry(BoundingBoxDto detectionBox, ParkingSlot slot) {
         double iou = SpatialAnalysisUtil.computeIoU(
@@ -159,7 +159,7 @@ public class DetectionService implements IDetectionService {
         repository.saveDetectionResult(result);
         return result;
     }
-    
+
     /** LPR from 3 frames; set camera currentFrame before each call. If frames null or <3, fallback to single frame. */
     public DetectionResult detectLicensePlateFromMultiFrames(Camera camera, List<byte[]> frames) {
         if (camera.getType() != Camera.CameraType.ENTRANCE_LPR) {
@@ -211,7 +211,7 @@ public class DetectionService implements IDetectionService {
         repository.saveDetectionResult(result);
         return result;
     }
-    
+
     @Override
     public void processDetectionResult(DetectionResult result) {
         if (result.getDetectionType() == DetectionResult.DetectionType.OCCUPANCY) {
@@ -230,30 +230,30 @@ public class DetectionService implements IDetectionService {
             }
         }
     }
-    
+
     @Override
     public List<DetectionResult> batchDetect(Camera camera, List<ParkingSlot> slots) {
         List<DetectionResult> results = new ArrayList<>();
-        
+
         for (ParkingSlot slot : slots) {
             DetectionResult result = detectOccupancy(camera, slot);
             results.add(result);
         }
-        
+
         return results;
     }
-    
+
     @Override
     public double getDetectionAccuracy() {
         if (totalDetections == 0) return 0.0;
         return (correctDetections / totalDetections) * 100.0;
     }
-    
+
     /** Total detection count. */
     public long getTotalDetections() {
         return (long) totalDetections;
     }
-    
+
     /** Correct detection count. */
     public long getCorrectDetections() {
         return (long) correctDetections;

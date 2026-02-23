@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package com.parkomfy.grpc;
+
+option java_multiple_files = true;
+option java_package = "com.parkomfy.grpc";
+option java_outer_classname = "DetectionProto";
+
+// Request message for vehicle detection
+message DetectionRequest {
+  string camera_id = 1;
+  bytes image_data = 2;
+  string slot_id = 3;  // Optional: specific slot to check
+}
+
+// Response message for vehicle detection
+message DetectionResponse {
+  bool vehicle_detected = 1;
+  double confidence = 2;
+  repeated BoundingBox bounding_boxes = 3;
+}
+
+// Bounding box for detected objects
+message BoundingBox {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+  string class_name = 5;
+  double confidence = 6;
+}
+
+// Request for license plate detection
+message LicensePlateRequest {
+  string camera_id = 1;
+  bytes image_data = 2;
+}
+
+// Response for license plate detection
+message LicensePlateResponse {
+  string license_plate_text = 1;
+  double confidence = 2;
+  BoundingBox plate_location = 3;
+}
+
+// gRPC Service definition
+service YOLODetectionService {
+  // Detect vehicles in a frame
+  rpc DetectVehicles(DetectionRequest) returns (DetectionResponse);
+  
+  // Detect license plates in a frame
+  rpc DetectLicensePlate(LicensePlateRequest) returns (LicensePlateResponse);
+  
+  // Batch detection for multiple slots
+  rpc DetectBatch(stream DetectionRequest) returns (stream DetectionResponse);
+}

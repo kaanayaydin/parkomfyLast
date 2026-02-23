@@ -1,49 +1,28 @@
 package com.parkomfy.ai;
 
+import com.parkomfy.model.BoundingBoxDto;
 import com.parkomfy.model.Camera;
 import com.parkomfy.model.ParkingSlot;
 
+import java.util.List;
+
 /**
- * Interface for YOLO model inference operations
- * Supports different implementations: ONNX Runtime, Python REST API, or Deep Java Library (DJL)
- * 
- * This abstraction allows switching between different YOLO implementations
- * without changing the business logic layer.
+ * YOLO inference interface. Swap implementations (ONNX, Python gRPC, DJL) without changing business logic.
  */
 public interface IYOLOInference {
-    
-    /**
-     * Detects if a vehicle is present in a parking slot
-     * 
-     * @param camera The camera providing the frame
-     * @param slot The parking slot to check
-     * @return true if vehicle is detected, false otherwise
-     */
+
+    /** Detect vehicle in slot via gRPC. */
     boolean detectVehicle(Camera camera, ParkingSlot slot);
-    
-    /**
-     * Detects license plate bounding box in the camera frame
-     * (First step before OCR)
-     * 
-     * @param camera The camera providing the frame
-     * @return Detected license plate text (raw detection, may need OCR refinement)
-     */
+
+    /** Detect license plate in frame; returns text or null. */
     String detectLicensePlateBoundingBox(Camera camera);
-    
-    /**
-     * Gets the confidence score of the last detection
-     * 
-     * @return Confidence score between 0.0 and 1.0
-     */
+
+    /** Last vehicle detection bounding boxes (for IoU). */
+    List<BoundingBoxDto> getLastBoundingBoxes();
+
+    /** Last detection confidence. */
     double getConfidence();
-    
-    /**
-     * Processes a frame and returns detection results
-     * This is the main entry point for YOLO inference
-     * 
-     * @param frameData Raw image frame data (bytes)
-     * @return true if vehicle is detected, false otherwise
-     */
+
+    /** Run detection on raw frame bytes; returns true if vehicle detected. */
     boolean processAndDetect(byte[] frameData);
 }
-

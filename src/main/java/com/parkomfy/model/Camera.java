@@ -17,7 +17,9 @@ public class Camera {
     private double xCoordinate;
     private double yCoordinate;
     private boolean hasNightVision;
-    
+    /** Current frame bytes for gRPC inference (JPEG/PNG). */
+    private byte[] currentFrame;
+
     public Camera(String cameraId, String cameraName, CameraType type, String location) {
         this.cameraId = cameraId;
         this.cameraName = cameraName;
@@ -101,7 +103,15 @@ public class Camera {
     public void setHasNightVision(boolean hasNightVision) {
         this.hasNightVision = hasNightVision;
     }
-    
+
+    public byte[] getCurrentFrame() {
+        return currentFrame;
+    }
+
+    public void setCurrentFrame(byte[] currentFrame) {
+        this.currentFrame = currentFrame;
+    }
+
     public boolean isActive() {
         return status == CameraStatus.ACTIVE;
     }

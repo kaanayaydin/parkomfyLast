@@ -14,9 +14,12 @@ public class ParkingSlot {
     private SlotStatus status;
     private Vehicle currentVehicle;
     private LocalDateTime lastStatusUpdate;
-    private double xCoordinate; // For mapping
-    private double yCoordinate; // For mapping
-    
+    private double xCoordinate;
+    private double yCoordinate;
+    /** Slot rectangle for IoU (same coord system as YOLO). */
+    private double slotWidth = 100.0;
+    private double slotHeight = 50.0;
+
     public ParkingSlot(String slotId, int floorNumber, String zone, int slotNumber) {
         this.slotId = slotId;
         this.floorNumber = floorNumber;
@@ -91,7 +94,23 @@ public class ParkingSlot {
     public void setYCoordinate(double yCoordinate) {
         this.yCoordinate = yCoordinate;
     }
-    
+
+    public double getSlotWidth() {
+        return slotWidth;
+    }
+
+    public void setSlotWidth(double slotWidth) {
+        this.slotWidth = slotWidth;
+    }
+
+    public double getSlotHeight() {
+        return slotHeight;
+    }
+
+    public void setSlotHeight(double slotHeight) {
+        this.slotHeight = slotHeight;
+    }
+
     public boolean isAvailable() {
         return status == SlotStatus.AVAILABLE;
     }

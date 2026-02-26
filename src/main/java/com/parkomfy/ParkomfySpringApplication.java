@@ -45,9 +45,8 @@ public class ParkomfySpringApplication {
     
     @Bean
     public YOLOInference yoloInference() {
-        // Use gRPC mode: connect to Python service on localhost:50051
-        // For testing without Python service, use: new YOLOInference()
-        return new YOLOInference("localhost", 50051);
+        // 127.0.0.1 = Python gRPC sunucusu (grpc_server/server.py)
+        return new YOLOInference("127.0.0.1", 50051);
     }
     
     @Bean

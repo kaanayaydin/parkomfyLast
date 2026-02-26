@@ -12,11 +12,14 @@ import io.grpc.ManagedChannelBuilder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /** YOLO inference via gRPC blocking stub to Python YOLO service. No simulation; all results from gRPC. */
 public class YOLOInference implements IYOLOInference {
 
     private static final double DEFAULT_CONFIDENCE = 0.0;
+    /** gRPC çağrı zaman aşımı (saniye); takılı kalmayı önler */
+    private static final int GRPC_DEADLINE_SECONDS = 15;
 
     private ManagedChannel channel;
     private YOLODetectionServiceGrpc.YOLODetectionServiceBlockingStub blockingStub;
@@ -69,7 +72,9 @@ public class YOLOInference implements IYOLOInference {
                 .setSlotId(slot != null ? slot.getSlotId() : "")
                 .build();
 
-        DetectionResponse response = blockingStub.detectVehicles(request);
+        DetectionResponse response = blockingStub
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .detectVehicles(request);
         lastDetectionResponse = response;
         lastConfidence = response.getConfidence();
         return response.getVehicleDetected();
@@ -87,7 +92,9 @@ public class YOLOInference implements IYOLOInference {
                 .setImageData(ByteString.copyFrom(frameData))
                 .build();
 
-        LicensePlateResponse response = blockingStub.detectLicensePlate(request);
+        LicensePlateResponse response = blockingStub
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .detectLicensePlate(request);
         lastLicensePlateResponse = response;
         lastConfidence = response.getConfidence();
         String text = response.getLicensePlateText();
@@ -122,7 +129,9 @@ public class YOLOInference implements IYOLOInference {
         DetectionRequest request = DetectionRequest.newBuilder()
                 .setImageData(ByteString.copyFrom(frameData))
                 .build();
-        DetectionResponse response = blockingStub.detectVehicles(request);
+        DetectionResponse response = blockingStub
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .detectVehicles(request);
         lastDetectionResponse = response;
         lastConfidence = response.getConfidence();
         return response.getVehicleDetected();

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package com.parkomfy.grpc;
+
+// Java ile aynı alan numaraları (wire-format uyumluluğu)
+message DetectionRequest {
+  string camera_id = 1;
+  bytes image_data = 2;
+  string slot_id = 3;
+}
+
+message BoundingBox {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+  string class_name = 5;
+  double confidence = 6;
+}
+
+message DetectionResponse {
+  bool vehicle_detected = 1;
+  double confidence = 2;
+  repeated BoundingBox bounding_boxes = 3;
+}
+
+message LicensePlateRequest {
+  string camera_id = 1;
+  bytes image_data = 2;
+}
+
+message LicensePlateResponse {
+  string license_plate_text = 1;
+  double confidence = 2;
+  BoundingBox plate_location = 3;
+}
+
+service YOLODetectionService {
+  rpc DetectVehicles(DetectionRequest) returns (DetectionResponse);
+  rpc DetectLicensePlate(LicensePlateRequest) returns (LicensePlateResponse);
+  rpc DetectBatch(stream DetectionRequest) returns (stream DetectionResponse);
+}

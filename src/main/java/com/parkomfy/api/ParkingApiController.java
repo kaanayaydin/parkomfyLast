@@ -4,6 +4,9 @@ import com.parkomfy.model.*;
 import com.parkomfy.service.*;
 import com.parkomfy.repository.IParkingRepository;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -15,7 +18,9 @@ import java.util.stream.Collectors;
  * Base URL: /api/v1
  */
 public class ParkingApiController {
-    
+
+    private static final Logger log = LoggerFactory.getLogger(ParkingApiController.class);
+
     private final IParkingService parkingService;
     private final IPaymentService paymentService;
     private final IDetectionService detectionService;
@@ -266,6 +271,75 @@ public class ParkingApiController {
             return ApiResponse.success(activeSessions, "Active sessions retrieved successfully");
         } catch (Exception e) {
             return ApiResponse.error("Error retrieving active sessions: " + e.getMessage(), 500);
+        }
+    }
+
+    // ============================================
+    // DETECTION TEST ENDPOINTS (camera image)
+    // ============================================
+
+    /**
+     * Test vehicle detection with an uploaded parking/camera image.
+     * Requires YOLO gRPC server on 127.0.0.1:50051 for real detection.
+     */
+    public ApiResponse<Map<String, Object>> detectVehicleFromImage(byte[] imageBytes) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            return ApiResponse.error("Image data is required", 400);
+        }
+        try {
+            Camera camera = new Camera("TEST-CAM-1", "Test Camera", Camera.CameraType.PARKING_AREA, "Test");
+            camera.setCurrentFrame(imageBytes);
+            ParkingSlot dummySlot = new ParkingSlot("TEST-SLOT-1", 1, "A", 1, 0.0, 0.0);
+            DetectionResult result = detectionService.detectOccupancy(camera, dummySlot);
+            Map<String, Object> data = new HashMap<>();
+            data.put("vehicleDetected", result.isVehicleDetected());
+            data.put("confidence", result.getConfidence());
+            data.put("detectionId", result.getDetectionId());
+            data.put("cameraId", result.getCameraId());
+            data.put("slotId", result.getSlotId());
+            data.put("demoMode", false);
+            return ApiResponse.success(data, "Detection completed");
+        } catch (Exception e) {
+            log.warn("gRPC araç tespiti başarısız, demo dönülüyor. Hata: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+            Map<String, Object> demo = new HashMap<>();
+            demo.put("vehicleDetected", true);
+            demo.put("confidence", 0.85);
+            demo.put("detectionId", "DEMO-" + System.currentTimeMillis());
+            demo.put("cameraId", "TEST-CAM-1");
+            demo.put("slotId", "TEST-SLOT-1");
+            demo.put("demoMode", true);
+            return ApiResponse.success(demo, "Demo sonuç (YOLO sunucusu kapalı; gerçek tespit için 127.0.0.1:50051 gRPC gerekli)");
+        }
+    }
+
+    /**
+     * Test license plate detection with an uploaded image (e.g. entrance camera).
+     * Requires YOLO gRPC server on 127.0.0.1:50051 for real detection.
+     */
+    public ApiResponse<Map<String, Object>> detectLicensePlateFromImage(byte[] imageBytes) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            return ApiResponse.error("Image data is required", 400);
+        }
+        try {
+            Camera camera = new Camera("TEST-LPR-1", "Test LPR Camera", Camera.CameraType.ENTRANCE_LPR, "Entrance");
+            camera.setCurrentFrame(imageBytes);
+            DetectionResult result = detectionService.detectLicensePlate(camera);
+            Map<String, Object> data = new HashMap<>();
+            data.put("licensePlateText", result.getLicensePlateText() != null ? result.getLicensePlateText() : "");
+            data.put("confidence", result.getConfidence());
+            data.put("detectionId", result.getDetectionId());
+            data.put("cameraId", result.getCameraId());
+            data.put("demoMode", false);
+            return ApiResponse.success(data, "License plate detection completed");
+        } catch (Exception e) {
+            log.warn("gRPC plaka tespiti başarısız, demo dönülüyor. Hata: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+            Map<String, Object> demo = new HashMap<>();
+            demo.put("licensePlateText", "34 ABC 123");
+            demo.put("confidence", 0.82);
+            demo.put("detectionId", "DEMO-" + System.currentTimeMillis());
+            demo.put("cameraId", "TEST-LPR-1");
+            demo.put("demoMode", true);
+            return ApiResponse.success(demo, "Demo sonuç (YOLO sunucusu kapalı; gerçek tespit için 127.0.0.1:50051 gRPC gerekli)");
         }
     }
 }

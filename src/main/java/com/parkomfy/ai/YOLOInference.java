@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import com.parkomfy.model.BoundingBoxDto;
 import com.parkomfy.model.Camera;
 import com.parkomfy.model.ParkingSlot;
+import com.parkomfy.model.ParkingSlotResultDto;
 import com.parkomfy.grpc.*;
 
 import io.grpc.ManagedChannel;
@@ -135,5 +136,44 @@ public class YOLOInference implements IYOLOInference {
         lastDetectionResponse = response;
         lastConfidence = response.getConfidence();
         return response.getVehicleDetected();
+    }
+
+    @Override
+    public List<ParkingSlotResultDto> detectParkingSlots(byte[] imageData) {
+        if (imageData == null) {
+            imageData = new byte[0];
+        }
+        DetectionRequest request = DetectionRequest.newBuilder()
+                .setImageData(ByteString.copyFrom(imageData))
+                .build();
+        ParkingSlotsResponse response = blockingStub
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .detectParkingSlots(request);
+        List<ParkingSlotResultDto> list = new ArrayList<>();
+        for (ParkingSlotResult r : response.getSlotsList()) {
+            List<double[]> corners = new ArrayList<>();
+            for (com.parkomfy.grpc.Point2D p : r.getCornersList()) {
+                corners.add(new double[]{ p.getX(), p.getY() });
+            }
+            list.add(new ParkingSlotResultDto(
+                    r.getX(), r.getY(), r.getWidth(), r.getHeight(),
+                    r.getOccupied(), r.getConfidence(), corners));
+        }
+        return list;
+    }
+
+    @Override
+    public byte[] getParkingSlotsAnnotatedImage(byte[] imageData) {
+        if (imageData == null) {
+            imageData = new byte[0];
+        }
+        DetectionRequest request = DetectionRequest.newBuilder()
+                .setImageData(ByteString.copyFrom(imageData))
+                .build();
+        ParkSlotsImageResponse response = blockingStub
+                .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                .detectParkingSlotsImage(request);
+        byte[] bytes = response.getImageJpeg().toByteArray();
+        return bytes.length > 0 ? bytes : null;
     }
 }

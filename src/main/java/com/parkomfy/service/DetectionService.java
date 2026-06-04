@@ -8,8 +8,14 @@ import com.parkomfy.ocr.LicensePlateReader;
 import com.parkomfy.repository.IParkingRepository;
 import com.parkomfy.util.SpatialAnalysisUtil;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Detection business logic: coordinates YOLO inference, OCR, repository. Uses DI for YOLO/OCR.
@@ -26,6 +32,9 @@ public class DetectionService implements IDetectionService {
 
     private double totalDetections = 0;
     private double correctDetections = 0;
+
+    /** Previous frame vehicle-detected state per slot (for EMPTY -> OCCUPIED transitions). */
+    private final Map<String, Boolean> previousVehicleDetected = new HashMap<>();
 
     /** DI: repository, YOLO impl, OCR impl. */
     public DetectionService(IParkingRepository repository,
@@ -123,25 +132,33 @@ public class DetectionService implements IDetectionService {
                     "Occupancy detection low confidence: " + String.format("%.3f", confidence),
                     camera.getCameraId(), slot.getSlotId(), null);
         }
+        BoundingBoxDto bestBox = null;
         if (!boxes.isEmpty()) {
-            BoundingBoxDto best = boxes.get(0);
+            bestBox = boxes.get(0);
             for (BoundingBoxDto b : boxes) {
                 double iou = SpatialAnalysisUtil.computeIoU(
                         b.getX(), b.getY(), b.getWidth(), b.getHeight(),
                         slot.getXCoordinate(), slot.getYCoordinate(), slot.getSlotWidth(), slot.getSlotHeight()
                 );
                 double bestIou = SpatialAnalysisUtil.computeIoU(
-                        best.getX(), best.getY(), best.getWidth(), best.getHeight(),
+                        bestBox.getX(), bestBox.getY(), bestBox.getWidth(), bestBox.getHeight(),
                         slot.getXCoordinate(), slot.getYCoordinate(), slot.getSlotWidth(), slot.getSlotHeight()
                 );
                 if (iou > bestIou) {
-                    best = b;
+                    bestBox = b;
                 }
             }
-            if (!isValidGeometry(best, slot)) {
+            if (!isValidGeometry(bestBox, slot)) {
                 vehicleDetected = false;
             }
         }
+
+        Boolean prev = previousVehicleDetected.get(slot.getSlotId());
+        boolean wasEmpty = prev == null ? !slot.isOccupied() : !prev;
+        if (vehicleDetected && wasEmpty && bestBox != null) {
+            onSlotBecameOccupied(camera, slot, bestBox);
+        }
+        previousVehicleDetected.put(slot.getSlotId(), vehicleDetected);
 
         DetectionResult result = new DetectionResult(
                 camera.getCameraId(),
@@ -158,6 +175,70 @@ public class DetectionService implements IDetectionService {
 
         repository.saveDetectionResult(result);
         return result;
+    }
+
+    /**
+     * EMPTY -> OCCUPIED: crop vehicle, run gRPC OCR, persist session via repository.
+     */
+    private void onSlotBecameOccupied(Camera camera, ParkingSlot slot, BoundingBoxDto vehicleBox) {
+        byte[] frame = camera.getCurrentFrame();
+        if (frame == null || frame.length == 0) {
+            return;
+        }
+        try {
+            byte[] crop = cropVehicleRegion(frame, vehicleBox);
+            camera.setCurrentFrame(crop);
+            String plateText = yoloInference.detectLicensePlateBoundingBox(camera);
+            double plateConf = yoloInference.getConfidence();
+
+            if (plateText == null || plateText.isEmpty()
+                    || "TESPIT EDILEMEDI".equalsIgnoreCase(plateText.replace(" ", "_"))) {
+                CVFailureLog.logFailure(CVFailureLog.FailureCategory.OCR_MISREAD,
+                        "OCR failed on occupancy transition",
+                        camera.getCameraId(), slot.getSlotId(), "confidence=" + plateConf);
+                return;
+            }
+
+            String normalized = plateText.replace(" ", "").toUpperCase();
+            LicensePlate licensePlate = new LicensePlate(normalized);
+            Vehicle vehicle = new Vehicle(licensePlate);
+            repository.saveVehicle(vehicle);
+
+            if (slot.isAvailable()) {
+                slot.occupy(vehicle);
+                ParkingSession session = new ParkingSession(vehicle, slot);
+                repository.saveSession(session);
+                repository.updateSlot(slot);
+            }
+
+            DetectionResult lprResult = new DetectionResult(camera.getCameraId(), slot.getSlotId(), true, plateConf);
+            lprResult.setLicensePlateText(normalized);
+            lprResult.setDetectionType(DetectionResult.DetectionType.LICENSE_PLATE);
+            repository.saveDetectionResult(lprResult);
+        } catch (Exception e) {
+            CVFailureLog.logFailure(CVFailureLog.FailureCategory.OCR_MISREAD,
+                    "Occupancy LPR pipeline error: " + e.getMessage(),
+                    camera.getCameraId(), slot.getSlotId(), null);
+        }
+    }
+
+    private byte[] cropVehicleRegion(byte[] frameBytes, BoundingBoxDto box) throws Exception {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(frameBytes));
+        int x = (int) box.getX();
+        int y = (int) box.getY();
+        int w = (int) box.getWidth();
+        int h = (int) box.getHeight();
+        x = Math.max(0, Math.min(x, img.getWidth() - 1));
+        y = Math.max(0, Math.min(y, img.getHeight() - 1));
+        w = Math.min(w, img.getWidth() - x);
+        h = Math.min(h, img.getHeight() - y);
+        if (w <= 0 || h <= 0) {
+            return frameBytes;
+        }
+        BufferedImage crop = img.getSubimage(x, y, w, h);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(crop, "jpg", out);
+        return out.toByteArray();
     }
 
     /** LPR from 3 frames; set camera currentFrame before each call. If frames null or <3, fallback to single frame. */
@@ -217,11 +298,7 @@ public class DetectionService implements IDetectionService {
         if (result.getDetectionType() == DetectionResult.DetectionType.OCCUPANCY) {
             ParkingSlot slot = repository.getSlot(result.getSlotId());
             if (slot != null) {
-                if (result.isVehicleDetected() && result.isHighConfidence()) {
-                    if (!slot.isOccupied()) {
-                        // Could trigger LPR and session creation
-                    }
-                } else if (!result.isVehicleDetected() && result.isHighConfidence()) {
+                if (!result.isVehicleDetected() && result.isHighConfidence()) {
                     if (slot.isOccupied()) {
                         slot.vacate();
                         repository.updateSlot(slot);

@@ -74,20 +74,22 @@ src/main/proto/
 ## Run
 
 ```bash
-# Build (generates gRPC from proto)
+# Java (generates gRPC stubs from proto)
 mvn clean compile
+java -cp target/classes com.parkomfy.ParkomfySpringApplication   # REST :8080
 
-# Demo
-java -cp target/classes com.parkomfy.ParkomfyDemo
+# Python gRPC inference engine (prototype CV logic)
+cd grpc_server
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python json_to_pkl.py          # optional: slots_*.json -> slots_*.pkl
+python server.py               # listens localhost:50051
 
-# Spring Boot
-java -cp target/classes com.parkomfy.ParkomfySpringApplication
-
-# GUI
-java -cp target/classes com.parkomfy.gui.ParkomfyGUI
+# Mobile (Expo)
+cd frontend && npm install && npx expo start
 ```
 
-**Requirements:** Python YOLO gRPC server implementing `detection.proto` on `localhost:50051`. Set `Camera.setCurrentFrame(byte[])` for each frame before detection.
+**Stack:** Java owns business logic + REST; Python is RPC-only (YOLO + EasyOCR + `slots_*.pkl` polygons). Frontend calls `http://localhost:8080/api/v1/*`, not Flask 5001.
 
 ---
 

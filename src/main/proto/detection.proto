@@ -43,6 +43,32 @@ message LicensePlateResponse {
   BoundingBox plate_location = 3;
 }
 
+// 2D nokta (normalize 0-1)
+message Point2D {
+  float x = 1;
+  float y = 2;
+}
+
+// Park slotu: perspektif dörtgen (4 köşe); x,y,width,height = sınırlayıcı kutu (geriye uyum)
+message ParkingSlotResult {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+  bool occupied = 5;
+  double confidence = 6;
+  repeated Point2D corners = 7;  // 4 köşe (örn. sol-üst, sağ-üst, sağ-alt, sol-alt) perspektif slot
+}
+
+message ParkingSlotsResponse {
+  repeated ParkingSlotResult slots = 1;
+}
+
+// OpenCV ile çizilmiş slot görseli (yeşil/kırmızı poligon + OCCUPIED skor)
+message ParkSlotsImageResponse {
+  bytes image_jpeg = 1;
+}
+
 // gRPC Service definition
 service YOLODetectionService {
   // Detect vehicles in a frame
@@ -50,6 +76,12 @@ service YOLODetectionService {
   
   // Detect license plates in a frame
   rpc DetectLicensePlate(LicensePlateRequest) returns (LicensePlateResponse);
+  
+  // Park slotlarını ızgara ile tespit et; her slot için dolu/boş + güven
+  rpc DetectParkingSlots(DetectionRequest) returns (ParkingSlotsResponse);
+  
+  // Park slotları + OpenCV görselleştirme (poligon ROI, yeşil/kırmızı, OCCUPIED)
+  rpc DetectParkingSlotsImage(DetectionRequest) returns (ParkSlotsImageResponse);
   
   // Batch detection for multiple slots
   rpc DetectBatch(stream DetectionRequest) returns (stream DetectionResponse);

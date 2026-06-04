@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import com.parkomfy.api.*;
 import com.parkomfy.ai.IYOLOInference;
-import com.parkomfy.model.BoundingBoxDto;
+import com.parkomfy.model.ParkingSlotResultDto;
 import com.parkomfy.model.Camera;
 import com.parkomfy.model.ParkingSlot;
 import com.parkomfy.service.IDetectionService;
@@ -235,7 +235,8 @@ public class ParkingRestController {
 
     /**
      * POST /api/v1/detect/vehicle/image
-     * Fotoğraf yükle; tespit edilen araçların çerçevelendiği ve altında güven skoru yazan resmi döndür (JPEG).
+     * Poligon ROI: slotlar 4 noktalı poligon. OpenCV ile yeşil (boş) / kırmızı (dolu + OCCUPIED + skor) çizilmiş JPEG.
+     * gRPC sunucu yanıt vermezse Java tarafında poligon çizimi fallback olarak kullanılır.
      */
     @PostMapping(value = "/detect/vehicle/image", produces = MediaType.IMAGE_JPEG_VALUE)
     public ResponseEntity<byte[]> detectVehicleImage(@RequestParam("image") MultipartFile image) {
@@ -243,17 +244,27 @@ public class ParkingRestController {
             return ResponseEntity.badRequest().build();
         }
         byte[] imageBytes;
-        BufferedImage bufferedImage;
         try {
             imageBytes = image.getBytes();
-            bufferedImage = ImageIO.read(new ByteArrayInputStream(imageBytes));
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
+        }
+        try {
+            byte[] annotated = yoloInference.getParkingSlotsAnnotatedImage(imageBytes);
+            if (annotated != null && annotated.length > 0) {
+                return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).body(annotated);
+            }
+        } catch (Exception ignored) {
+            // gRPC/Python kapalı veya hata: fallback
+        }
+        BufferedImage bufferedImage = null;
+        try {
+            bufferedImage = ImageIO.read(new ByteArrayInputStream(imageBytes));
+        } catch (Exception ignored) {
         }
         if (bufferedImage == null) {
             return ResponseEntity.badRequest().build();
         }
-        // Şeffaflık varsa RGB'ye çevir; JPEG düzgün yazılsın
         if (bufferedImage.getType() != BufferedImage.TYPE_INT_RGB && bufferedImage.getType() != BufferedImage.TYPE_INT_BGR) {
             BufferedImage rgb = new BufferedImage(bufferedImage.getWidth(), bufferedImage.getHeight(), BufferedImage.TYPE_INT_RGB);
             Graphics2D g2 = rgb.createGraphics();
@@ -266,43 +277,59 @@ public class ParkingRestController {
         }
         int imgW = bufferedImage.getWidth();
         int imgH = bufferedImage.getHeight();
-
         try {
-            Camera camera = new Camera("TEST-CAM-1", "Test", Camera.CameraType.PARKING_AREA, "Test");
-            camera.setCurrentFrame(imageBytes);
-            ParkingSlot dummySlot = new ParkingSlot("TEST-SLOT-1", 1, "A", 1, 0.0, 0.0);
-            detectionService.detectOccupancy(camera, dummySlot);
-
-            List<BoundingBoxDto> boxes = yoloInference.getLastBoundingBoxes();
+            List<ParkingSlotResultDto> slots = yoloInference.detectParkingSlots(imageBytes);
             Graphics2D g = bufferedImage.createGraphics();
             try {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 g.setStroke(new BasicStroke(3f));
-
-                for (BoundingBoxDto box : boxes) {
-                    int x = (int) (box.getX() * imgW);
-                    int y = (int) (box.getY() * imgH);
-                    int w = (int) (box.getWidth() * imgW);
-                    int h = (int) (box.getHeight() * imgH);
-                    g.setColor(new Color(0, 255, 0, 200));
-                    g.drawRect(x, y, w, h);
-                    String label = String.format("%.0f%%", box.getConfidence() * 100);
-                    g.setColor(Color.GREEN);
-                    g.setFont(new Font("SansSerif", Font.BOLD, Math.max(14, imgH / 25)));
-                    FontMetrics fm = g.getFontMetrics();
-                    int textY = y + h + fm.getAscent() + 4;
-                    g.drawString(label, x, textY);
+                g.setFont(new Font("SansSerif", Font.BOLD, Math.max(14, imgH / 25)));
+                FontMetrics fm = g.getFontMetrics();
+                for (ParkingSlotResultDto slot : slots) {
+                    java.util.List<double[]> corners = slot.getCorners();
+                    int[] xPoints = null;
+                    int[] yPoints = null;
+                    if (corners != null && corners.size() == 4) {
+                        xPoints = new int[4];
+                        yPoints = new int[4];
+                        for (int i = 0; i < 4; i++) {
+                            xPoints[i] = (int) (corners.get(i)[0] * imgW);
+                            yPoints[i] = (int) (corners.get(i)[1] * imgH);
+                        }
+                    }
+                    int x = (int) (slot.getX() * imgW);
+                    int y = (int) (slot.getY() * imgH);
+                    int w = (int) (slot.getWidth() * imgW);
+                    int h = (int) (slot.getHeight() * imgH);
+                    if (slot.isOccupied()) {
+                        g.setColor(new Color(220, 20, 20, 220));
+                        if (xPoints != null) {
+                            g.drawPolygon(xPoints, yPoints, 4);
+                        } else {
+                            g.drawRect(x, y, w, h);
+                        }
+                        g.setColor(Color.RED);
+                        int textY = y + h + fm.getAscent() + 4;
+                        g.drawString("OCCUPIED " + String.format("%.0f%%", slot.getConfidence() * 100), x, textY);
+                    } else {
+                        g.setColor(new Color(20, 180, 20, 220));
+                        if (xPoints != null) {
+                            g.drawPolygon(xPoints, yPoints, 4);
+                        } else {
+                            g.drawRect(x, y, w, h);
+                        }
+                        g.setColor(new Color(20, 140, 20));
+                        int textY = y + h + fm.getAscent() + 4;
+                        g.drawString("Boş", x, textY);
+                    }
                 }
             } finally {
                 g.dispose();
             }
         } catch (Exception ignored) {
-            // Tespit hatası olsa bile çıktıyı orijinal resimle ver
         }
-
         try {
-            byte[] jpeg = toJpegBytes(bufferedImage);
-            return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).body(jpeg);
+            return ResponseEntity.ok().contentType(MediaType.IMAGE_JPEG).body(toJpegBytes(bufferedImage));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().build();
         }

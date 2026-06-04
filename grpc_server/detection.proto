@@ -35,8 +35,34 @@ message LicensePlateResponse {
   BoundingBox plate_location = 3;
 }
 
+message Point2D {
+  float x = 1;
+  float y = 2;
+}
+
+message ParkingSlotResult {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+  bool occupied = 5;
+  double confidence = 6;
+  repeated Point2D corners = 7;
+}
+
+message ParkingSlotsResponse {
+  repeated ParkingSlotResult slots = 1;
+}
+
+// OpenCV ile çizilmiş slot görseli (yeşil/kırmızı poligon + OCCUPIED skor)
+message ParkSlotsImageResponse {
+  bytes image_jpeg = 1;
+}
+
 service YOLODetectionService {
   rpc DetectVehicles(DetectionRequest) returns (DetectionResponse);
   rpc DetectLicensePlate(LicensePlateRequest) returns (LicensePlateResponse);
+  rpc DetectParkingSlots(DetectionRequest) returns (ParkingSlotsResponse);
+  rpc DetectParkingSlotsImage(DetectionRequest) returns (ParkSlotsImageResponse);
   rpc DetectBatch(stream DetectionRequest) returns (stream DetectionResponse);
 }

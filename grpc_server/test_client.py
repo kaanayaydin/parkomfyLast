@@ -10,7 +10,7 @@ def main():
         channel = grpc.insecure_channel("localhost:50051")
         stub = detection_pb2_grpc.YOLODetectionServiceStub(channel)
         req = detection_pb2.DetectionRequest(camera_id="test", image_data=b"x" * 1000, slot_id="s1")
-        resp = stub.DetectVehicles(req, timeout=5)
+        resp = stub.DetectVehicles(req, timeout=60)
         print("OK - Sunucu yanıt verdi:", "vehicle_detected=", resp.vehicle_detected, "confidence=", resp.confidence)
         return 0
     except grpc.RpcError as e:

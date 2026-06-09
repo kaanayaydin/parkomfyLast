@@ -51,6 +51,13 @@ public class CameraSimulationService {
             return "loop1";
         }
         String k = lotKey.trim().toLowerCase().replace(".mp4", "");
+        // Entry/exit annotated cameras pass through unchanged.
+        if (k.equals("giris") || k.equals("entry")) {
+            return "giris";
+        }
+        if (k.equals("cikis") || k.equals("exit")) {
+            return "cikis";
+        }
         if (k.startsWith("istasyon")) {
             String n = k.replace("istasyon", "");
             if (!n.isBlank()) {

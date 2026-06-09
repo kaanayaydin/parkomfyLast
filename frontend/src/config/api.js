@@ -6,7 +6,9 @@ import { Platform } from 'react-native';
  * Expo Go on a physical device cannot reach "localhost" (that is the phone itself).
  * Use the dev machine IP from Expo's debugger host, or set API_HOST_OVERRIDE below.
  */
-const API_HOST_OVERRIDE = '192.168.1.101';
+// Sabit IP yazmayın; Wi-Fi değişince telefon sunucuya ulaşamaz (ERR_ADDRESS_UNREACHABLE).
+// Gerekirse geçici olarak buraya yazın, yoksa Expo'nun debugger host'unu kullanır.
+const API_HOST_OVERRIDE = null;
 
 function resolveApiHost() {
   if (API_HOST_OVERRIDE) return API_HOST_OVERRIDE;
@@ -22,7 +24,7 @@ function resolveApiHost() {
     return debuggerHost.split(':')[0];
   }
 
-  return '192.168.1.101';
+  return 'localhost';
 }
 
 export const API_HOST = resolveApiHost();

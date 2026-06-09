@@ -204,7 +204,29 @@ public class DatabaseManager implements IParkingRepository {
     }
 
     private void seedDemoAreas() {
-        // Demo otopark verisi yok — admin panelden oluşturulur
+        // MySQL yokken veriler bellekte tutulur ve her restart'ta silinir.
+        // Eren'in kalibrasyonu (grpc_server/calibrations/AREA-004.json) burada
+        // tohumlanir: loop1 videosu, videodaki 3 slot (poligon koseleriyle).
+        // Boylece restart sonrasi otopark eski haliyle geri gelir.
+        // MySQL acilirsa (ensureConnection) bu calismaz, gercek DB kullanilir.
+        ParkingArea area = new ParkingArea("AREA-004", "Otopark", "Özyeğin Üniversitesi");
+        double[][][] slotCorners = {
+            {{0.662, 0.408}, {0.848, 0.485}, {0.782, 0.834}, {0.475, 0.769}},
+            {{0.465, 0.462}, {0.618, 0.515}, {0.402, 0.781}, {0.222, 0.692}},
+            {{0.268, 0.414}, {0.448, 0.438}, {0.185, 0.71}, {0.025, 0.615}},
+        };
+        for (int i = 0; i < slotCorners.length; i++) {
+            ParkingSlot slot = new ParkingSlot("SLOT-loop1-" + (i + 1), 0, "A", i + 1);
+            double[][] c = slotCorners[i];
+            slot.setC1x(c[0][0]); slot.setC1y(c[0][1]);
+            slot.setC2x(c[1][0]); slot.setC2y(c[1][1]);
+            slot.setC3x(c[2][0]); slot.setC3y(c[2][1]);
+            slot.setC4x(c[3][0]); slot.setC4y(c[3][1]);
+            area.addParkingSlot(slot);
+        }
+        demoAreas.put("AREA-004", area);
+        demoLotKeys.put("AREA-004", "loop1");
+        demoCalibrated.put("AREA-004", true);
     }
 
     private ParkingArea buildDemoArea(String areaId, String areaName, String lotKey, int slotCount, int occupiedCount) {

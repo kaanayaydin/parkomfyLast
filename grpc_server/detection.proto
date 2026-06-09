@@ -48,6 +48,11 @@ message ParkingSlotResult {
   bool occupied = 5;
   double confidence = 6;
   repeated Point2D corners = 7;
+  int32 slot_number = 8;
+  float vehicle_x = 9;
+  float vehicle_y = 10;
+  float vehicle_width = 11;
+  float vehicle_height = 12;
 }
 
 message ParkingSlotsResponse {

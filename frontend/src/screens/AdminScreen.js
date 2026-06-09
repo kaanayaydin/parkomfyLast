@@ -39,9 +39,11 @@ const AdminScreen = ({ onEnterDetail, onNewParking }) => {
             key={item.areaId}
             style={styles.card}
             onPress={() => onEnterDetail({
-              id: item.lotKey || item.areaId,
+              id: item.areaId,
               name: item.areaName,
               areaId: item.areaId,
+              lotKey: item.lotKey || 'loop1',
+              slotCount: item.slotCount,
               calibrated: item.calibrated,
             })}
           >

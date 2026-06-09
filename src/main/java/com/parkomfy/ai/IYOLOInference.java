@@ -37,4 +37,11 @@ public interface IYOLOInference {
 
     /** OpenCV ile çizilmiş slot görseli (yeşil/kırmızı poligon, OCCUPIED). Hata durumunda null. */
     byte[] getParkingSlotsAnnotatedImage(byte[] imageData);
+
+    default byte[] getParkingSlotsAnnotatedImage(byte[] imageData, String areaId) {
+        return getParkingSlotsAnnotatedImage(imageData);
+    }
+
+    /** Araç kırpımından plaka OCR (EasyOCR). */
+    String detectLicensePlateFromCrop(byte[] vehicleCropJpeg, int slotNumber);
 }

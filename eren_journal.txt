@@ -1,0 +1,250 @@
+================================================================================
+PARKOMFY — EREN AGENT JOURNAL
+================================================================================
+Dosya: eren_journal.txt
+Sahip: Eren (Cursor Agent oturumları)
+Amaç: Bu projede agent tarafından yapılan tüm değişikliklerin kronolojik kaydı.
+Not: Her yeni güncellemede bu dosyanın sonuna veya ilgili bölüme ekleme yapılır.
+      (Kaan için benzer dosya: kaan_journal.txt — Kaan'ın agent'ı tutacak.)
+
+Son güncelleme: 2026-06-09
+================================================================================
+
+
+--------------------------------------------------------------------------------
+1. PROJE ÖZETİ
+--------------------------------------------------------------------------------
+Proje: PARKOMFY — Akıllı otopark yönetim sistemi
+Konum: C:\Users\erena\repos\parkomfyLast-main
+Git remote: https://github.com/kaanayaydin/parkomfyLast
+Çalışma branch'i: develop-eren
+
+Mimari:
+  - Backend: Java Spring Boot (:8080), MySQL (parkomfy)
+  - AI: Python gRPC (:50051) + kamera HTTP simülatörü (:50052)
+  - Admin web: http://localhost:8080/admin
+  - Mobil: Expo/React Native (sürücü + admin modu)
+
+Önemli yerel dosyalar (Git'e dahil değil):
+  - best (2).pt — YOLO slot kalibrasyon modeli
+  - loop1.mp4, loop2.mp4, loop3.mp4 — kamera simülasyon videoları
+
+
+--------------------------------------------------------------------------------
+2. KRONOLOJİK ÇALIŞMALAR (BAŞTAN İTİBAREN)
+--------------------------------------------------------------------------------
+
+[2026-06-08 / 09] Model yolu
+  - Custom model best (2).pt kullanılacak şekilde yapılandırıldı.
+  - Ortam değişkeni: PARKOMFY_SLOT_MODEL
+  - grpc_server/slot_model.py ve server.py bu modele bağlandı.
+
+[2026-06-08 / 09] Git & branch
+  - Proje GitHub'a bağlandı (kaanayaydin/parkomfyLast).
+  - develop-eren branch'i oluşturuldu (main yerine geliştirme burada).
+  - *.pt ve *.mp4 .gitignore'da (büyük dosyalar remote'a gitmiyor).
+
+[2026-06-08 / 09] Servis başlatma komutları
+  - MySQL: db/start-mysql.bat
+  - Python AI: grpc_server/server.py (PARKOMFY_SLOT_MODEL set)
+  - Spring Boot: mvn spring-boot:run
+  - Expo: frontend → npx expo start
+  - Kullanıcıya terminal komutları dokümante edildi.
+
+[2026-06-08 / 09] Veritabanı sıfırlama & 3 otopark kurulumu
+  - Otopark alanları, slotlar, rezervasyonlar temizlendi; kullanıcılar korundu.
+  - db/reset-parking-data.sql, DatabaseManager.resetAllParkingData()
+  - Admin panelden 3 lot: loop1, loop2, loop3 videoları ile kalibrasyon.
+  - Kullanıcılar: admin, test@parkomfy.com, erenersms
+
+[2026-06-08 / 09] erenersms giriş düzeltmesi
+  - isDemoMode() sonsuz özyineleme hatası giderildi.
+  - DatabaseManager.ensureConnection() — MySQL yeniden bağlantı.
+  - Demo mod yerine gerçek MySQL kullanımı sağlandı.
+
+[2026-06-08 / 09] parkomfy-backend karşılaştırması
+  - erenerismis/parkomfy-backend ile mimari karşılaştırma yapıldı.
+  - Hibrit sistem kararı: kalibre poligon + yolov8n (canlı doluluk),
+    best (2).pt yalnızca kalibrasyon tahmini için.
+
+[2026-06-09] HİBRİT DOLULUK SİSTEMİ (büyük mimari değişiklik)
+  Yeni dosyalar / değişiklikler:
+  - grpc_server/hybrid_occupancy.py — poligon + yolov8n point-in-polygon
+  - grpc_server/calibrations/AREA-xxx.json — kalibrasyon dosyaları
+  - server.py — AREA-* alanları için hibrit tespit
+  - detection.proto — slot_number, vehicle_x/y/width/height alanları
+  - OccupancySyncService.java — syncArea, getLiveHybridStatus
+  - LiveParkingService.java — DB + rezervasyon birleşimi
+  - MIN_OCC_CONF = 0.25
+
+[2026-06-09] Çoklu kamera paralel akış
+  - grpc_server/camera_simulator.py yeniden yazıldı.
+  - loop1, loop2, loop3 eşzamanlı çalışır.
+  - /snapshot/loop1.jpg, loop2, loop3 endpoint'leri.
+  - CameraSimulationService.getLiveSnapshotForLot(lotKey)
+  - Her parking area'ya lot_key atandı.
+
+[2026-06-09] Admin panel — canlı video & overlay
+  - /admin/live-hybrid — CMD logları ile aynı hibrit durum
+  - admin.js drawLiveOverlay — letterbox (object-fit: contain) hizalama
+  - Video dropdown: lot başına loop1/2/3
+  - POST /admin/parking-areas/reset
+
+[2026-06-09] Plaka eşleştirme & OCR
+  - Slot yeni dolunca araç kırpımı OCR (gRPC DetectLicensePlate)
+  - Fallback: PlateSimulationService (34 PGZ 545, 67 ACP 810)
+  - OccupancySyncService.assignPlateFromHybridDetection()
+
+[2026-06-09] BUG: Boş slotlarda plaka görünüyordu — DÜZELTİLDİ
+  Sebep:
+    - syncArea boşalınca oturum kapanmıyordu
+    - getLiveHybridStatus boş slotlarda licensePlate temizlemiyordu
+    - admin.js aktif oturumlardan plakayı boş slotlara da yazıyordu
+  Düzeltme:
+    - OccupancySyncService.syncArea() — oturum kapat + vacate()
+    - getLiveHybridStatus() — BOŞ → licensePlate=null
+    - admin.js — plaka yalnızca OCCUPIED/RESERVED'da
+
+[2026-06-09] BUG: Mobilde tüm slotlar dolu görünüyordu — DÜZELTİLDİ
+  Sebep:
+    - Mobil SLOT-AREA-004-1 üretiyordu; DB'de SLOT-loop1-1
+    - /parking/live yalnızca DB'ye bakıyordu (hibrit değil)
+  Düzeltme:
+    - SlotSelectionScreen gerçek slotId ile eşleştirme
+    - App.js applyLiveData — slotId canlı veriden
+    - ParkingApiController — kalibre alanlarda getLiveHybridStatus
+
+[2026-06-09] Mobil rezervasyon iptali
+  Backend:
+    - POST /api/v1/parking/reservations/{id}/cancel?licensePlate=
+    - ReservationService.cancelReservation()
+  Mobil:
+    - cancelReservation() api.js
+    - ReservationsScreen — "Rezervasyonu İptal Et" butonu
+    - App.js handleCancelReservation, loadReservations
+
+[2026-06-09] Admin panel — rezervasyonlar & slot/araç görünümü
+  Backend:
+    - getAllReservations() — DatabaseManager
+    - GET /admin/reservations (areaId opsiyonel — tümü veya alan bazlı)
+  Web admin:
+    - index.html — Rezervasyonlar sekmesi, slot durumu panelleri
+    - admin.js — loadAllReservations, renderSlotStatusPanel,
+      refreshDetail rezervasyon birleştirmesi
+  - Video overlay'de rezerve/dolu plaka gösterimi iyileştirildi
+
+[2026-06-09] Admin vs sürücü ayrımı (ilk deneme — yanlış anlaşıldı)
+  - Admin mobil girişi engellendi (sonra geri alındı)
+  - erenersms için mobil UI sadeleştirildi (video/slot detay kaldırıldı)
+  - DB: admin dışındaki ADMIN rolü USER'a çekiliyor (startup migration)
+
+[2026-06-09] Admin mobil uygulama — doğru uygulama
+  Kullanıcı isteği: Admin mobilde girebilsin, sürücüden farklı özellikler görsün.
+  Yapılanlar:
+    - App.js — isAdminUser(), ADMIN_TABS vs DRIVER_TABS
+    - Admin giriş engeli kaldırıldı
+    - AdminScreen, AdminDetailScreen, AdminReservationsScreen App.js'e bağlandı
+    - Admin detay: canlı video (lotKey), slot doluluk/plaka, oturumlar, rezervasyonlar
+    - AdminReservationsScreen: tüm rezervasyonlar + otopark filtresi
+    - erenersms / normal USER: eski sürücü akışı (otopark → slot → ödeme → rezervasyon)
+
+[2026-06-09] eren_journal.txt oluşturuldu
+  - Bu dosya; bundan sonra her agent güncellemesinde güncellenecek.
+
+
+--------------------------------------------------------------------------------
+3. ÖNEMLİ DOSYALAR (EREN AGENT TARAFINDAN DEĞİŞTİRİLEN)
+--------------------------------------------------------------------------------
+
+Python / AI:
+  grpc_server/hybrid_occupancy.py
+  grpc_server/camera_simulator.py
+  grpc_server/server.py
+  grpc_server/slot_model.py
+  grpc_server/detection.proto
+  grpc_server/calibrations/*.json
+
+Java Backend:
+  src/main/java/com/parkomfy/service/OccupancySyncService.java
+  src/main/java/com/parkomfy/service/LiveParkingService.java
+  src/main/java/com/parkomfy/service/ReservationService.java
+  src/main/java/com/parkomfy/service/CameraSimulationService.java
+  src/main/java/com/parkomfy/api/ParkingApiController.java
+  src/main/java/com/parkomfy/controller/ParkingRestController.java
+  src/main/java/com/parkomfy/repository/DatabaseManager.java
+  src/main/java/com/parkomfy/repository/IParkingRepository.java
+  src/main/proto/detection.proto
+
+Admin Web:
+  src/main/resources/static/admin/index.html
+  src/main/resources/static/admin/js/admin.js
+  src/main/resources/static/admin/css/admin.css
+
+Mobil (Expo):
+  frontend/App.js
+  frontend/src/config/api.js
+  frontend/src/screens/SlotSelectionScreen.js
+  frontend/src/screens/ReservationsScreen.js
+  frontend/src/screens/HomeScreen.js
+  frontend/src/screens/AdminScreen.js
+  frontend/src/screens/AdminDetailScreen.js
+  frontend/src/screens/AdminReservationsScreen.js  (yeni)
+  frontend/src/components/LiveCameraView.js
+
+DB:
+  db/reset-parking-data.sql
+
+
+--------------------------------------------------------------------------------
+4. API ÖZETİ (EKLENEN / DEĞİŞEN)
+--------------------------------------------------------------------------------
+  GET  /api/v1/admin/live-hybrid?areaId=
+  GET  /api/v1/admin/reservations?areaId=   (areaId opsiyonel → tümü)
+  GET  /api/v1/parking/live?areaId=&startTime=&endTime=  (hibrit, kalibre alan)
+  POST /api/v1/parking/reservations/{id}/cancel?licensePlate=
+  GET  /api/v1/camera/live/snapshot?lot=loop1|loop2|loop3
+  POST /api/v1/admin/parking-areas/reset
+
+
+--------------------------------------------------------------------------------
+5. BİLİNEN KULLANICI HESAPLARI
+--------------------------------------------------------------------------------
+  admin        — ADMIN, mobil admin modu + web /admin, şifre: 1234
+  erenersms    — USER, mobil sürücü uygulaması
+  test@parkomfy.com — USER
+
+
+--------------------------------------------------------------------------------
+6. SERVİS BAŞLATMA (HIZLI REFERANS)
+--------------------------------------------------------------------------------
+  # MySQL
+  cd db && .\start-mysql.bat
+
+  # Python AI + kameralar
+  $env:PARKOMFY_SLOT_MODEL = "C:\Users\erena\repos\parkomfyLast-main\best (2).pt"
+  cd grpc_server && python server.py
+
+  # Spring Boot
+  cd parkomfyLast-main && mvn spring-boot:run
+
+  # Expo mobil
+  cd frontend && npx expo start
+
+
+--------------------------------------------------------------------------------
+7. AÇIK / GELECEKTEKİ NOTLAR
+--------------------------------------------------------------------------------
+  - Admin web paneli (/admin) kimlik doğrulama gerektirmiyor (açık REST).
+  - *.pt ve *.mp4 yerelde olmalı; GitHub'da yok.
+  - Kaan journal: kaan_journal.txt (Kaan'ın agent'ı oluşturacak).
+  - Bu dosya her agent oturumunda yapılan değişikliklerle güncellenmeli.
+
+
+================================================================================
+GÜNCELLEME LOGU (kısa satırlar — yeni işler buraya eklenir)
+================================================================================
+2026-06-09 | eren_journal.txt ilk oluşturma; tüm önceki oturumlar özetlendi.
+2026-06-09 | Admin mobil modu: AdminScreen/Detail/Reservations App.js entegrasyonu.
+2026-06-09 | Git push: develop-eren → origin (commit 42e60b5, 41 dosya).
+
+================================================================================

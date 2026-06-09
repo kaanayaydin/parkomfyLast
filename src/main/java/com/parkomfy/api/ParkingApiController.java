@@ -33,6 +33,7 @@ public class ParkingApiController {
     private final ParkingEventBroadcaster broadcaster;
     private final ParkingSetupService parkingSetupService;
     private final PlateSimulationService plateSimulationService;
+    private final OccupancySyncService occupancySyncService;
     
     public ParkingApiController(IParkingService parkingService,
                                IPaymentService paymentService,
@@ -44,7 +45,8 @@ public class ParkingApiController {
                                NotificationService notificationService,
                                ParkingEventBroadcaster broadcaster,
                                ParkingSetupService parkingSetupService,
-                               PlateSimulationService plateSimulationService) {
+                               PlateSimulationService plateSimulationService,
+                               OccupancySyncService occupancySyncService) {
         this.parkingService = parkingService;
         this.paymentService = paymentService;
         this.detectionService = detectionService;
@@ -56,6 +58,20 @@ public class ParkingApiController {
         this.broadcaster = broadcaster;
         this.parkingSetupService = parkingSetupService;
         this.plateSimulationService = plateSimulationService;
+        this.occupancySyncService = occupancySyncService;
+    }
+
+    /** Admin video overlay — anlık hibrit tespit (CMD logları ile aynı kaynak). */
+    public ApiResponse<LiveParkingStatusDto> getLiveHybridStatus(String areaId) {
+        try {
+            LiveParkingStatusDto dto = occupancySyncService.getLiveHybridStatus(areaId);
+            if (dto == null) {
+                return ApiResponse.error("Area not found", 404);
+            }
+            return ApiResponse.success(dto, "Live hybrid status");
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage(), 500);
+        }
     }
     
     // ============================================
@@ -68,7 +84,9 @@ public class ParkingApiController {
      */
     public ApiResponse<ParkingStatusDto> getParkingStatus(String areaId) {
         try {
-            LiveParkingStatusDto live = liveParkingService.getLiveStatus(areaId, null, null);
+            LiveParkingStatusDto live = repository.isAreaCalibrated(areaId)
+                ? occupancySyncService.getLiveHybridStatus(areaId)
+                : liveParkingService.getLiveStatus(areaId, null, null);
             if (live == null) {
                 return ApiResponse.error("Parking area not found", 404);
             }
@@ -90,7 +108,9 @@ public class ParkingApiController {
         try {
             LocalDateTime start = startTime != null && !startTime.isBlank() ? parseDateTime(startTime) : LocalDateTime.now();
             LocalDateTime end = endTime != null && !endTime.isBlank() ? parseDateTime(endTime) : start.plusHours(2);
-            LiveParkingStatusDto live = liveParkingService.getLiveStatus(areaId, start, end);
+            LiveParkingStatusDto live = repository.isAreaCalibrated(areaId)
+                ? occupancySyncService.getLiveHybridStatus(areaId, start, end)
+                : liveParkingService.getLiveStatus(areaId, start, end);
             if (live == null) {
                 return ApiResponse.error("Parking area not found", 404);
             }
@@ -343,6 +363,32 @@ public class ParkingApiController {
     }
 
     /**
+     * POST /api/v1/parking/reservations/{reservationId}/cancel
+     * Cancel a reservation owned by the given license plate.
+     */
+    public ApiResponse<ReservationDto> cancelReservation(String reservationId, String licensePlate) {
+        try {
+            SlotReservation reservation = reservationService.cancelReservation(reservationId, licensePlate);
+            LiveParkingStatusDto live = repository.isAreaCalibrated(reservation.getAreaId())
+                ? occupancySyncService.getLiveHybridStatus(reservation.getAreaId())
+                : liveParkingService.getLiveStatus(reservation.getAreaId(), null, null);
+            if (live != null) {
+                broadcaster.broadcastLiveStatus(live);
+            }
+            notificationService.sendToPlate(licensePlate,
+                "Rezervasyon iptal edildi",
+                reservation.getSlotId() + " slotu için rezervasyonunuz iptal edildi.");
+            return ApiResponse.success(new ReservationDto(reservation), "Reservation cancelled");
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage(), 404);
+        } catch (IllegalStateException e) {
+            return ApiResponse.error(e.getMessage(), 409);
+        } catch (Exception e) {
+            return ApiResponse.error("Error cancelling reservation: " + e.getMessage(), 500);
+        }
+    }
+
+    /**
      * GET /api/v1/parking/reservations
      * List reservations for a license plate.
      */
@@ -512,10 +558,14 @@ public class ParkingApiController {
 
     public ApiResponse<List<ReservationDto>> getAdminReservations(String areaId) {
         try {
-            List<ReservationDto> list = repository.getReservationsForArea(areaId).stream()
+            List<SlotReservation> raw = (areaId == null || areaId.isBlank())
+                ? repository.getAllReservations()
+                : repository.getReservationsForArea(areaId);
+            List<ReservationDto> list = raw.stream()
                 .map(ReservationDto::new)
                 .collect(Collectors.toList());
-            return ApiResponse.success(list, "Area reservations");
+            return ApiResponse.success(list, areaId == null || areaId.isBlank()
+                ? "All reservations" : "Area reservations");
         } catch (Exception e) {
             return ApiResponse.error("Error: " + e.getMessage(), 500);
         }
@@ -574,6 +624,17 @@ public class ParkingApiController {
             return ApiResponse.success(dto, "Otopark oluşturuldu", 201);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(e.getMessage(), 400);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage(), 500);
+        }
+    }
+
+    public ApiResponse<Map<String, Object>> resetParkingData() {
+        try {
+            parkingSetupService.resetParkingData();
+            Map<String, Object> body = new HashMap<>();
+            body.put("cleared", true);
+            return ApiResponse.success(body, "Tüm otoparklar ve rezervasyonlar silindi (kullanıcılar korundu)");
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage(), 500);
         }

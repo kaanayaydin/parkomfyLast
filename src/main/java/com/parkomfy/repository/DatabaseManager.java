@@ -27,7 +27,7 @@ public class DatabaseManager implements IParkingRepository {
     private final Map<String, List<String>> demoPushTokens = new HashMap<>();
     private final Map<String, String> demoLotKeys = new HashMap<>();
     private final Map<String, Boolean> demoCalibrated = new HashMap<>();
-    private final boolean useDemoData;
+    private boolean useDemoData;
     
     public DatabaseManager(String url, String username, String password) {
         this.url = url;
@@ -41,10 +41,41 @@ public class DatabaseManager implements IParkingRepository {
             System.out.println("Using in-memory demo parking data (MySQL unavailable)");
         }
     }
+
+    /** MySQL sonradan açıldıysa demo moddan veritabanına geç. */
+    private synchronized void ensureConnection() {
+        if (connection != null) {
+            try {
+                if (!connection.isClosed() && connection.isValid(2)) {
+                    return;
+                }
+            } catch (SQLException ignored) {
+                connection = null;
+            }
+        }
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            connection = DriverManager.getConnection(url, username, password);
+            createTables();
+            if (useDemoData) {
+                System.out.println("MySQL bağlantısı kuruldu — veritabanı moduna geçildi");
+            }
+            useDemoData = false;
+        } catch (Exception e) {
+            connection = null;
+            useDemoData = true;
+        }
+    }
+
+    private boolean isDemoMode() {
+        if (useDemoData) {
+            ensureConnection();
+        }
+        return useDemoData;
+    }
     
     private void initializeDatabase() {
         try {
-            // Load MySQL JDBC driver
             Class.forName("com.mysql.cj.jdbc.Driver");
             connection = DriverManager.getConnection(url, username, password);
             createTables();
@@ -142,31 +173,12 @@ public class DatabaseManager implements IParkingRepository {
 
     private void seedMysqlData(Statement stmt) throws SQLException {
         stmt.executeUpdate(
-            "INSERT INTO parking_areas (area_id, area_name, address) VALUES " +
-            "('AREA-001', 'A Blok Otoparkı', 'Özyeğin Üniversitesi'), " +
-            "('AREA-002', 'B Blok Otoparkı', 'Özyeğin Üniversitesi'), " +
-            "('AREA-003', 'C Blok Otoparkı', 'Özyeğin Üniversitesi') " +
-            "ON DUPLICATE KEY UPDATE area_name = VALUES(area_name)");
-        stmt.executeUpdate(
-            "INSERT INTO parking_slots (slot_id, area_id, floor_number, zone_name, slot_number, status) VALUES " +
-            "('SLOT-istasyon1-1', 'AREA-001', 0, 'A', 1, 'OCCUPIED'), " +
-            "('SLOT-istasyon1-2', 'AREA-001', 0, 'A', 2, 'OCCUPIED'), " +
-            "('SLOT-istasyon1-3', 'AREA-001', 0, 'A', 3, 'AVAILABLE'), " +
-            "('SLOT-istasyon1-4', 'AREA-001', 0, 'A', 4, 'AVAILABLE'), " +
-            "('SLOT-istasyon1-5', 'AREA-001', 0, 'A', 5, 'AVAILABLE'), " +
-            "('SLOT-istasyon2-1', 'AREA-002', 0, 'A', 1, 'OCCUPIED'), " +
-            "('SLOT-istasyon2-2', 'AREA-002', 0, 'A', 2, 'AVAILABLE'), " +
-            "('SLOT-istasyon2-3', 'AREA-002', 0, 'A', 3, 'AVAILABLE'), " +
-            "('SLOT-istasyon2-4', 'AREA-002', 0, 'A', 4, 'AVAILABLE'), " +
-            "('SLOT-istasyon3-1', 'AREA-003', 0, 'A', 1, 'OCCUPIED'), " +
-            "('SLOT-istasyon3-2', 'AREA-003', 0, 'A', 2, 'AVAILABLE'), " +
-            "('SLOT-istasyon3-3', 'AREA-003', 0, 'A', 3, 'AVAILABLE') " +
-            "ON DUPLICATE KEY UPDATE status = VALUES(status)");
-        stmt.executeUpdate(
             "INSERT INTO users (user_id, email, password_hash, full_name, license_plate, role) VALUES " +
             "('USR-ADMIN', 'admin', '" + com.parkomfy.service.AuthService.hashPassword("1234") + "', " +
             "'Yönetici', '34 OZU 450', 'ADMIN') " +
-            "ON DUPLICATE KEY UPDATE full_name = VALUES(full_name)");
+            "ON DUPLICATE KEY UPDATE role='ADMIN', full_name='Yönetici'");
+        stmt.executeUpdate(
+            "UPDATE users SET role='USER' WHERE email <> 'admin' AND role='ADMIN'");
     }
 
     private void seedDemoUsers() {
@@ -189,20 +201,10 @@ public class DatabaseManager implements IParkingRepository {
         for (String sql : alters) {
             try { stmt.executeUpdate(sql); } catch (SQLException ignored) { }
         }
-        try {
-            stmt.executeUpdate("UPDATE parking_areas SET lot_key = 'istasyon1' WHERE area_id = 'AREA-001' AND lot_key IS NULL");
-            stmt.executeUpdate("UPDATE parking_areas SET lot_key = 'istasyon2' WHERE area_id = 'AREA-002' AND lot_key IS NULL");
-            stmt.executeUpdate("UPDATE parking_areas SET lot_key = 'istasyon3' WHERE area_id = 'AREA-003' AND lot_key IS NULL");
-        } catch (SQLException ignored) { }
     }
 
     private void seedDemoAreas() {
-        demoAreas.put("AREA-001", buildDemoArea("AREA-001", "A Blok Otoparkı", "istasyon1", 5, 2));
-        demoAreas.put("AREA-002", buildDemoArea("AREA-002", "B Blok Otoparkı", "istasyon2", 4, 1));
-        demoAreas.put("AREA-003", buildDemoArea("AREA-003", "C Blok Otoparkı", "istasyon3", 3, 1));
-        demoLotKeys.put("AREA-001", "istasyon1");
-        demoLotKeys.put("AREA-002", "istasyon2");
-        demoLotKeys.put("AREA-003", "istasyon3");
+        // Demo otopark verisi yok — admin panelden oluşturulur
     }
 
     private ParkingArea buildDemoArea(String areaId, String areaName, String lotKey, int slotCount, int occupiedCount) {
@@ -224,7 +226,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void saveAreaFull(ParkingArea area, String lotKey) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoAreas.put(area.getAreaId(), area);
             if (lotKey != null) demoLotKeys.put(area.getAreaId(), lotKey);
             return;
@@ -244,7 +246,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public String nextAreaId() {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return "AREA-" + String.format("%03d", demoAreas.size() + 1);
         }
         try (Statement stmt = connection.createStatement();
@@ -262,7 +264,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public String getLotKey(String areaId) {
-        if (useDemoData) return demoLotKeys.getOrDefault(areaId, "lot" + areaId);
+        if (isDemoMode()) return demoLotKeys.getOrDefault(areaId, "lot" + areaId);
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT lot_key FROM parking_areas WHERE area_id = ?")) {
             ps.setString(1, areaId);
@@ -277,7 +279,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public boolean isAreaCalibrated(String areaId) {
-        if (useDemoData) return demoCalibrated.getOrDefault(areaId, false);
+        if (isDemoMode()) return demoCalibrated.getOrDefault(areaId, false);
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT calibrated FROM parking_areas WHERE area_id = ?")) {
             ps.setString(1, areaId);
@@ -292,7 +294,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void markAreaCalibrated(String areaId, boolean calibrated) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoCalibrated.put(areaId, calibrated);
             return;
         }
@@ -308,7 +310,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void deleteSlotsForArea(String areaId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             ParkingArea area = demoAreas.get(areaId);
             if (area != null) area.getParkingSlots().clear();
             return;
@@ -323,8 +325,43 @@ public class DatabaseManager implements IParkingRepository {
     }
 
     @Override
+    public void resetAllParkingData() {
+        if (isDemoMode()) {
+            demoAreas.clear();
+            demoReservations.clear();
+            demoSessions.clear();
+            demoDetections.clear();
+            demoLotKeys.clear();
+            demoCalibrated.clear();
+            demoVehicles.clear();
+            return;
+        }
+        if (connection == null) {
+            return;
+        }
+        String[] sqls = {
+            "DELETE FROM slot_reservations",
+            "DELETE FROM parking_sessions",
+            "DELETE FROM detection_results",
+            "DELETE FROM parking_slots",
+            "DELETE FROM parking_areas"
+        };
+        try (Statement stmt = connection.createStatement()) {
+            stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
+            for (String sql : sqls) {
+                stmt.executeUpdate(sql);
+            }
+            stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 1");
+            System.out.println("All parking areas, slots and reservations cleared (users kept)");
+        } catch (SQLException e) {
+            System.err.println("resetAllParkingData failed: " + e.getMessage());
+            throw new IllegalStateException("Otopark verileri silinemedi: " + e.getMessage());
+        }
+    }
+
+    @Override
     public void insertSlot(String areaId, ParkingSlot slot) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             ParkingArea area = demoAreas.get(areaId);
             if (area != null) area.addParkingSlot(slot);
             return;
@@ -350,7 +387,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public ParkingArea getArea(String areaId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoAreas.get(areaId);
         }
         try (PreparedStatement ps = connection.prepareStatement(
@@ -377,7 +414,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public List<ParkingArea> getAllAreas() {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return new ArrayList<>(demoAreas.values());
         }
         List<ParkingArea> areas = new ArrayList<>();
@@ -403,7 +440,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void updateSlot(ParkingSlot slot) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             for (ParkingArea area : demoAreas.values()) {
                 ParkingSlot existing = area.getSlotById(slot.getSlotId());
                 if (existing != null) {
@@ -425,7 +462,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public ParkingSlot getSlot(String slotId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             for (ParkingArea area : demoAreas.values()) {
                 ParkingSlot slot = area.getSlotById(slotId);
                 if (slot != null) {
@@ -450,7 +487,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public List<ParkingSlot> getAllSlots(String areaId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             ParkingArea area = demoAreas.get(areaId);
             if (area != null) {
                 return area.getParkingSlots();
@@ -491,7 +528,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void saveVehicle(Vehicle vehicle) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoVehicles.put(vehicle.getVehicleId(), vehicle);
             return;
         }
@@ -512,7 +549,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public Vehicle getVehicle(String vehicleId) {
-        if (useDemoData) return demoVehicles.get(vehicleId);
+        if (isDemoMode()) return demoVehicles.get(vehicleId);
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id FROM vehicles WHERE vehicle_id = ?")) {
             ps.setString(1, vehicleId);
@@ -529,7 +566,7 @@ public class DatabaseManager implements IParkingRepository {
     public Vehicle getVehicleByPlate(LicensePlate licensePlate) {
         if (licensePlate == null) return null;
         String plate = normalizePlate(licensePlate);
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoVehicles.values().stream()
                 .filter(v -> normalizePlate(v.getLicensePlate()).equals(plate))
                 .findFirst().orElse(null);
@@ -550,7 +587,7 @@ public class DatabaseManager implements IParkingRepository {
     @Override
     public List<Vehicle> getRecentEnteredVehicles() {
         LocalDateTime since = LocalDateTime.now().minusHours(4);
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoVehicles.values().stream()
                 .filter(v -> v.getEntryTime() != null && v.getEntryTime().isAfter(since))
                 .collect(java.util.stream.Collectors.toList());
@@ -571,7 +608,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void saveSession(ParkingSession session) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoSessions.add(session);
             return;
         }
@@ -595,7 +632,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void updateSession(ParkingSession session) {
-        if (useDemoData) return;
+        if (isDemoMode()) return;
         try (PreparedStatement ps = connection.prepareStatement(
                 "UPDATE parking_sessions SET exit_time = ?, status = ? WHERE session_id = ?")) {
             ps.setTimestamp(1, session.getExitTime() != null ? Timestamp.valueOf(session.getExitTime()) : null);
@@ -609,7 +646,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public ParkingSession getSession(String sessionId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoSessions.stream().filter(s -> s.getSessionId().equals(sessionId)).findFirst().orElse(null);
         }
         try (PreparedStatement ps = connection.prepareStatement(
@@ -627,7 +664,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public List<ParkingSession> getActiveSessions() {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoSessions.stream().filter(ParkingSession::isActive).collect(java.util.stream.Collectors.toList());
         }
         List<ParkingSession> list = new ArrayList<>();
@@ -644,7 +681,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public ParkingSession getActiveSessionForSlot(String slotId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoSessions.stream()
                 .filter(s -> s.isActive() && s.getParkingSlot() != null && slotId.equals(s.getParkingSlot().getSlotId()))
                 .findFirst().orElse(null);
@@ -664,7 +701,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public ParkingSession getActiveSessionByPlate(String normalizedPlate) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoSessions.stream()
                 .filter(s -> s.isActive() && s.getVehicle() != null && s.getVehicle().getLicensePlate() != null
                     && normalizePlate(s.getVehicle().getLicensePlate()).equals(normalizedPlate))
@@ -741,7 +778,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void saveDetectionResult(DetectionResult result) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoDetections.add(0, result);
             return;
         }
@@ -777,7 +814,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<DetectionResult> getRecentDetections(String areaId, int limit) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoDetections.stream().limit(limit).collect(java.util.stream.Collectors.toList());
         }
         List<DetectionResult> list = new ArrayList<>();
@@ -805,7 +842,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void savePushToken(String userId, String expoPushToken) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoPushTokens.computeIfAbsent(userId, k -> new ArrayList<>()).add(expoPushToken);
             return;
         }
@@ -823,7 +860,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<String> getPushTokensForUser(String userId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoPushTokens.getOrDefault(userId, new ArrayList<>());
         }
         List<String> tokens = new ArrayList<>();
@@ -841,7 +878,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<String> getPushTokensForPlate(String normalizedPlate) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             User user = demoUsers.values().stream()
                 .filter(u -> u.getLicensePlate() != null
                     && normalizePlate(new LicensePlate(u.getLicensePlate())).equals(normalizedPlate))
@@ -865,7 +902,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void saveUser(User user) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoUsers.put(user.getEmail().toLowerCase(), user);
             return;
         }
@@ -887,7 +924,7 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public User getUser(String userId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoUsers.values().stream()
                 .filter(u -> u.getUserId().equals(userId))
                 .findFirst().orElse(null);
@@ -907,7 +944,7 @@ public class DatabaseManager implements IParkingRepository {
     @Override
     public User getUserByEmail(String email) {
         String key = email.trim().toLowerCase();
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoUsers.get(key);
         }
         try (PreparedStatement ps = connection.prepareStatement(
@@ -936,7 +973,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void saveReservation(SlotReservation reservation) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             demoReservations.add(reservation);
             return;
         }
@@ -960,7 +997,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public SlotReservation getReservation(String reservationId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> r.getReservationId().equals(reservationId))
                 .findFirst().orElse(null);
@@ -982,7 +1019,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<SlotReservation> getReservationsByPlate(String licensePlate) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> r.getLicensePlate().equalsIgnoreCase(licensePlate))
                 .collect(java.util.stream.Collectors.toList());
@@ -1005,7 +1042,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<SlotReservation> getOverlappingReservations(String slotId, LocalDateTime start, LocalDateTime end) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> r.getSlotId().equals(slotId))
                 .filter(r -> r.getStatus() == SlotReservation.ReservationStatus.RESERVED
@@ -1050,7 +1087,13 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public void updateReservation(SlotReservation reservation) {
-        if (useDemoData) return;
+        if (isDemoMode()) {
+            demoReservations.stream()
+                .filter(r -> r.getReservationId().equals(reservation.getReservationId()))
+                .findFirst()
+                .ifPresent(r -> r.setStatus(reservation.getStatus()));
+            return;
+        }
         try (PreparedStatement ps = connection.prepareStatement(
                 "UPDATE slot_reservations SET status = ? WHERE reservation_id = ?")) {
             ps.setString(1, reservation.getStatus().name());
@@ -1062,8 +1105,26 @@ public class DatabaseManager implements IParkingRepository {
     }
 
     @Override
+    public List<SlotReservation> getAllReservations() {
+        if (isDemoMode()) {
+            return new ArrayList<>(demoReservations);
+        }
+        List<SlotReservation> list = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT reservation_id, slot_id, area_id, license_plate, start_time, end_time, status, total_fee, created_at " +
+                "FROM slot_reservations ORDER BY start_time DESC")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) list.add(mapReservation(rs));
+            }
+        } catch (SQLException e) {
+            System.err.println("getAllReservations failed: " + e.getMessage());
+        }
+        return list;
+    }
+
+    @Override
     public List<SlotReservation> getReservationsForArea(String areaId) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> areaId.equals(r.getAreaId()))
                 .collect(java.util.stream.Collectors.toList());
@@ -1086,7 +1147,7 @@ public class DatabaseManager implements IParkingRepository {
     public SlotReservation getActiveReservationByPlate(String licensePlate, LocalDateTime at) {
         String plate = licensePlate != null ? licensePlate.replaceAll("[^A-Za-z0-9]", "").toUpperCase() : "";
         if (plate.isEmpty()) return null;
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> normalizePlate(new LicensePlate(r.getLicensePlate())).equals(plate))
                 .filter(r -> r.getStatus() == SlotReservation.ReservationStatus.RESERVED
@@ -1112,7 +1173,7 @@ public class DatabaseManager implements IParkingRepository {
 
     @Override
     public List<SlotReservation> getUpcomingReservations(LocalDateTime from, LocalDateTime to) {
-        if (useDemoData) {
+        if (isDemoMode()) {
             return demoReservations.stream()
                 .filter(r -> !r.getStartTime().isBefore(from) && !r.getStartTime().isAfter(to))
                 .collect(java.util.stream.Collectors.toList());

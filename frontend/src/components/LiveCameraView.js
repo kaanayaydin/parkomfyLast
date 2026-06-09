@@ -5,7 +5,8 @@ import { getLiveCameraSnapshotUrl, getLiveCameraStatus } from '../config/api';
 /**
  * loop1.mp4 simülasyonu — sunucudan ~8 fps snapshot polling ile canlı görüntü.
  */
-const LiveCameraView = ({ height = 220, label = 'Canlı Kamera (loop1.mp4)' }) => {
+const LiveCameraView = ({ height = 220, label, lotKey = 'loop1' }) => {
+  const displayLabel = label || `Canlı Kamera (${lotKey}.mp4)`;
   const [frameKey, setFrameKey] = useState(0);
   const [available, setAvailable] = useState(null);
   const intervalRef = useRef(null);
@@ -27,13 +28,13 @@ const LiveCameraView = ({ height = 220, label = 'Canlı Kamera (loop1.mp4)' }) =
 
   return (
     <View>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label}>{displayLabel}</Text>
       <View style={[styles.box, { height }]}>
         {available === null ? (
           <ActivityIndicator color="#1A237E" />
         ) : (
           <Image
-            source={{ uri: getLiveCameraSnapshotUrl(frameKey) }}
+            source={{ uri: getLiveCameraSnapshotUrl(lotKey, frameKey) }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"
           />

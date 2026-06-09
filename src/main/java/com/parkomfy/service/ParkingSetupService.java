@@ -29,14 +29,26 @@ public class ParkingSetupService {
         this.yoloInference = yoloInference;
     }
 
+    private static final Set<String> ALLOWED_VIDEOS = Set.of("loop1", "loop2", "loop3");
+
+    public void resetParkingData() {
+        repository.resetAllParkingData();
+        clearCalibrationFiles();
+    }
+
     public ParkingAreaDto createParkingArea(CreateParkingAreaRequest req) {
         if (req.getAreaName() == null || req.getAreaName().isBlank()) {
             throw new IllegalArgumentException("areaName is required");
         }
         String areaId = repository.nextAreaId();
-        String lotKey = req.getLotKey() != null && !req.getLotKey().isBlank()
-            ? req.getLotKey().trim()
-            : "lot" + areaId.replace("AREA-", "");
+        String lotKey = normalizeVideoLotKey(req.getLotKey());
+        for (ParkingArea existing : repository.getAllAreas()) {
+            String existingKey = repository.getLotKey(existing.getAreaId());
+            if (lotKey.equals(existingKey)) {
+                throw new IllegalArgumentException(
+                    "Bu kamera videosu zaten kullanılıyor: " + lotKey + " (" + existing.getAreaName() + ")");
+            }
+        }
         ParkingArea area = new ParkingArea(areaId, req.getAreaName().trim(),
             req.getAddress() != null ? req.getAddress().trim() : "");
         repository.saveAreaFull(area, lotKey);
@@ -192,6 +204,34 @@ public class ParkingSetupService {
         slot.setYCoordinate(minY);
         slot.setSlotWidth(maxX - minX);
         slot.setSlotHeight(maxY - minY);
+    }
+
+    private String normalizeVideoLotKey(String lotKey) {
+        if (lotKey == null || lotKey.isBlank()) {
+            throw new IllegalArgumentException("Kamera videosu seçin (loop1, loop2 veya loop3)");
+        }
+        String key = lotKey.trim().toLowerCase().replace(".mp4", "");
+        if (!ALLOWED_VIDEOS.contains(key)) {
+            throw new IllegalArgumentException("Geçersiz video: " + lotKey + " (loop1, loop2, loop3)");
+        }
+        return key;
+    }
+
+    private void clearCalibrationFiles() {
+        try {
+            Path dir = Paths.get("grpc_server", "calibrations");
+            if (!Files.isDirectory(dir)) {
+                return;
+            }
+            try (var stream = Files.list(dir)) {
+                stream.filter(p -> p.getFileName().toString().endsWith(".json"))
+                    .forEach(p -> {
+                        try { Files.deleteIfExists(p); } catch (Exception ignored) { }
+                    });
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Kalibrasyon dosyaları silinemedi: " + e.getMessage());
+        }
     }
 
     private void writeCalibrationJson(String areaId, int w, int h, List<Map<String, Object>> slots) {

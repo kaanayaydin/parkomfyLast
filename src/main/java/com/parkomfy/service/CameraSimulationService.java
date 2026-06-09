@@ -22,8 +22,14 @@ public class CameraSimulationService {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public byte[] getLiveSnapshot() {
+        return getLiveSnapshotForLot(null);
+    }
+
+    /** lotKey: loop1, loop2, loop3 — her otopark kendi paralel stream'inden. */
+    public byte[] getLiveSnapshotForLot(String lotKey) {
         try {
-            URL url = new URL(CAMERA_BASE + "/snapshot.jpg?t=" + System.currentTimeMillis());
+            String lot = normalizeLotKey(lotKey);
+            URL url = new URL(CAMERA_BASE + "/snapshot/" + lot + ".jpg?t=" + System.currentTimeMillis());
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setConnectTimeout(3000);
             conn.setReadTimeout(5000);
@@ -38,6 +44,20 @@ public class CameraSimulationService {
             System.err.println("Live camera snapshot failed: " + e.getMessage());
             return null;
         }
+    }
+
+    private static String normalizeLotKey(String lotKey) {
+        if (lotKey == null || lotKey.isBlank()) {
+            return "loop1";
+        }
+        String k = lotKey.trim().toLowerCase().replace(".mp4", "");
+        if (k.startsWith("istasyon")) {
+            String n = k.replace("istasyon", "");
+            if (!n.isBlank()) {
+                return "loop" + n;
+            }
+        }
+        return k.startsWith("loop") ? k : "loop" + k;
     }
 
     public boolean isCameraAvailable() {

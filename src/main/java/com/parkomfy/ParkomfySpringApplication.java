@@ -134,11 +134,12 @@ public class ParkomfySpringApplication {
             NotificationService notificationService,
             ParkingEventBroadcaster broadcaster,
             ParkingSetupService parkingSetupService,
-            PlateSimulationService plateSimulationService) {
+            PlateSimulationService plateSimulationService,
+            OccupancySyncService occupancySyncService) {
         return new ParkingApiController(parkingService, paymentService, 
                                        detectionService, repository, reservationService,
                                        liveParkingService, plateTrackingService,
                                        notificationService, broadcaster, parkingSetupService,
-                                       plateSimulationService);
+                                       plateSimulationService, occupancySyncService);
     }
 }

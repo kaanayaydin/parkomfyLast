@@ -167,19 +167,52 @@ public class YOLOInference implements IYOLOInference {
             }
             list.add(new ParkingSlotResultDto(
                     r.getX(), r.getY(), r.getWidth(), r.getHeight(),
-                    r.getOccupied(), r.getConfidence(), corners));
+                    r.getOccupied(), r.getConfidence(), corners,
+                    r.getSlotNumber(), r.getVehicleX(), r.getVehicleY(),
+                    r.getVehicleWidth(), r.getVehicleHeight()));
         }
         return list;
     }
 
     @Override
+    public String detectLicensePlateFromCrop(byte[] vehicleCropJpeg, int slotNumber) {
+        if (vehicleCropJpeg == null || vehicleCropJpeg.length < 50) {
+            return null;
+        }
+        LicensePlateRequest request = LicensePlateRequest.newBuilder()
+                .setCameraId("slot-" + slotNumber)
+                .setImageData(ByteString.copyFrom(vehicleCropJpeg))
+                .build();
+        try {
+            LicensePlateResponse response = blockingStub
+                    .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .detectLicensePlate(request);
+            String text = response.getLicensePlateText();
+            if (text == null || text.isBlank()) {
+                return null;
+            }
+            return text.trim();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    @Override
     public byte[] getParkingSlotsAnnotatedImage(byte[] imageData) {
+        return getParkingSlotsAnnotatedImage(imageData, "");
+    }
+
+    @Override
+    public byte[] getParkingSlotsAnnotatedImage(byte[] imageData, String areaId) {
         if (imageData == null) {
             imageData = new byte[0];
         }
-        DetectionRequest request = DetectionRequest.newBuilder()
-                .setImageData(ByteString.copyFrom(imageData))
-                .build();
+        DetectionRequest.Builder b = DetectionRequest.newBuilder()
+                .setImageData(ByteString.copyFrom(imageData));
+        if (areaId != null && !areaId.isBlank()) {
+            b.setCameraId(areaId);
+        }
+        DetectionRequest request = b.build();
         ParkSlotsImageResponse response = blockingStub
                 .withDeadlineAfter(GRPC_SLOT_DEADLINE_SECONDS, TimeUnit.SECONDS)
                 .detectParkingSlotsImage(request);

@@ -1,31 +1,22 @@
 import React from 'react';
 import { View, Text, FlatList, TouchableOpacity, SafeAreaView } from 'react-native';
 
-// Backend ile %100 uyumlu otopark yapısı
-export const PARKING_LOTS = [
-  { 
-    id: 'istasyon1', name: 'A Blok Otoparkı', location: 'Zemin Kat', price: 20,
-    slots: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, status: 'available' }))
-  },
-  { 
-    id: 'istasyon2', name: 'B Blok Otoparkı', location: 'Kat -1', price: 35,
-    slots: Array.from({ length: 4 }, (_, i) => ({ id: i + 1, status: 'available' }))
-  },
-  { 
-    id: 'istasyon3', name: 'C Blok Otoparkı', location: 'Kat -2', price: 15,
-    slots: Array.from({ length: 3 }, (_, i) => ({ id: i + 1, status: 'available' }))
-  },
-];
-
 const HomeScreen = ({ onNavigate, parkingData }) => {
+  const list = parkingData || [];
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F5F5', paddingHorizontal: 20 }}>
       <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#1A237E', marginVertical: 20 }}>
         Otopark Seçiniz
       </Text>
+      {!list.length ? (
+        <Text style={{ fontSize: 15, color: '#666', lineHeight: 22 }}>
+          Henüz kayıtlı otopark yok. Yönetici admin panelden otopark oluşturup kalibre etmeli.
+        </Text>
+      ) : null}
       <FlatList
-        data={parkingData} // App.js'den gelen canlı veriyi kullanır
-        keyExtractor={(item) => item.id}
+        data={list}
+        keyExtractor={(item) => item.id || item.areaId}
         renderItem={({ item }) => (
           <TouchableOpacity 
             style={{ 

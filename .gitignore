@@ -1,0 +1,72 @@
+# Java
+*.class
+*.jar
+*.war
+*.nar
+*.log
+*.zip
+*.tar.gz
+*.rar
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+web-build/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+.classpath
+.project
+.settings/
+bin/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build
+build/
+dist/
+*.exe
+
+# Python gRPC generated (run: cd grpc_server && python generate.py)
+grpc_server/detection_pb2.py
+grpc_server/detection_pb2_grpc.py
+.venv/
+
+# Park slot etiketleme çıktıları (slot_definer / YOLO TXT / görsel)
+grpc_server/slots_*.json
+grpc_server/slots_*.txt
+grpc_server/slots_*.jpg
+
+# ML weights & demo videos (too large for GitHub; set PARKOMFY_SLOT_MODEL locally)
+*.pt
+*.mp4
+
+# Others
+*.log
+*.tmp
+.env
+.gradle/

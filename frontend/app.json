@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Parkomfy",
+    "slug": "Parkomfy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1A237E"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Park kamerası görüntüsü yüklemek için galeri erişimi gerekir.",
+          "cameraPermission": "Plaka okuma ve park taraması için kamera erişimi gerekir."
+        }
+      ]
+    ]
+  }
+}

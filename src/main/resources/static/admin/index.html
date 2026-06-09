@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PARKOMFY Admin</title>
+  <link rel="stylesheet" href="/admin/css/admin.css" />
+</head>
+<body>
+  <header>
+    <h1>PARKOMFY Admin</h1>
+    <nav>
+      <label class="video-select-label">
+        Kamera:
+        <select id="videoSelect" onchange="onVideoChange(this.value)"></select>
+      </label>
+      <a href="#" onclick="backToList(); return false;">Otoparklar</a>
+      <a href="#" onclick="startNewSetup(); return false;">+ Yeni Otopark</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Liste -->
+    <section data-view="list" class="card">
+      <h2>Otoparklar</h2>
+      <p class="hint">Kalibrasyon ve canlı doluluk yönetimi (bilgisayar paneli)</p>
+      <div id="areaList"></div>
+      <div class="row">
+        <button class="btn green" onclick="startNewSetup()">+ Yeni Otopark Kaydı</button>
+      </div>
+    </section>
+
+    <!-- Kurulum -->
+    <section data-view="setup" class="hidden">
+      <div class="card">
+        <h2>Yeni Otopark / Kalibrasyon</h2>
+        <p class="step-label" id="setupStepLabel">Adım 1/3</p>
+
+        <div id="setupStep1">
+          <input id="areaName" placeholder="Otopark adı *" />
+          <input id="areaAddress" placeholder="Adres" style="margin-top:8px" />
+          <input id="lotKey" placeholder="Lot anahtarı (opsiyonel)" style="margin-top:8px" />
+          <div class="row">
+            <button class="btn" onclick="createArea()">Otopark Oluştur →</button>
+          </div>
+        </div>
+
+        <div id="setupStep2" class="hidden">
+          <p class="hint">Canlı video akışı — tahmin için o anki kare dondurulur.</p>
+          <img id="setupLiveStream" class="live-stream" alt="Canlı kamera" />
+          <div class="row">
+            <button class="btn red" onclick="predictFromLive()">Canlı Görüntüden Slot Tahmini</button>
+          </div>
+        </div>
+
+        <div id="setupStep3" class="hidden">
+          <p class="hint">Köşeleri fare ile sürükleyin. Mavi = elle eklenen slot.</p>
+          <div id="calibWrap">
+            <canvas id="calibCanvas"></canvas>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn blue" onclick="addSlot()">+ Slot Ekle</button>
+            <button class="btn red" onclick="deleteSlot()">Seçili Sil</button>
+          </div>
+          <div id="slotChips" style="margin-top:10px"></div>
+          <div id="cornerCoords"></div>
+          <div class="row">
+            <button class="btn green" onclick="saveCalibration()">✓ Onayla ve Kaydet</button>
+            <button class="btn gray" onclick="backToList()">İptal</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Canlı detay -->
+    <section data-view="detail" class="hidden">
+      <div class="card">
+        <h2 id="detailTitle">Canlı İzleme</h2>
+        <p class="hint" id="detailMeta">Yükleniyor… (5 sn güncelleme)</p>
+        <div id="liveVideoWrap" class="video-overlay-wrap">
+          <img id="liveStream" class="live-stream" alt="Canlı kamera akışı" onload="onLiveStreamResize()" />
+          <canvas id="liveOverlay" class="live-overlay"></canvas>
+        </div>
+        <div id="slotGrid" class="slot-grid"></div>
+      </div>
+      <div class="card">
+        <h2>Plaka Tanıma (Giriş Simülasyonu)</h2>
+        <p class="hint">Giriş kamerası simülasyonu — otopark içinde varsayılan plakalar:</p>
+        <div id="entryPlatePanel" class="plate-panel"></div>
+        <div id="activePlatePanel" class="plate-panel"></div>
+      </div>
+      <div class="card">
+        <h2>Manuel Plaka (admin)</h2>
+        <p class="hint">Giriş kamerası simülasyonu: 34 PGZ 545, 67 ACP 810 otopark içinde varsayılır.</p>
+        <input id="manualSlotId" placeholder="Slot ID (örn: SLOT-lot4-1)" />
+        <input id="manualPlate" placeholder="Plaka (örn: 34 PGZ 545)" style="margin-top:8px" />
+        <div class="row">
+          <button class="btn" onclick="assignManualPlate()">Slota Ata</button>
+          <button class="btn gray" onclick="backToList()">← Listeye Dön</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="/admin/js/admin.js"></script>
+</body>
+</html>

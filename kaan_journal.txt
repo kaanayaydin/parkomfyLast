@@ -1,0 +1,191 @@
+================================================================================
+KAAN_JOURNAL  -  Kaan'in AI Agent Calisma Gunlugu (Parkomfy Projesi)
+================================================================================
+Bu dosya, Kaan'in agent'i (Cursor AI) tarafindan bu projede yapilan tum
+calismalarin detayli ve kronolojik kaydidir. Her yeni guncellemede en alta
+yeni bir kayit eklenir. (Eren'in agent'i da kendi gunlugunu ayri tutacak.)
+
+Bicim: Her kayit -> [TARIH] Baslik / Ne yapildi / Neden / Etkilenen dosyalar.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+PROJE GENEL MIMARISI (referans)
+--------------------------------------------------------------------------------
+Parkomfy 3 ana bilesenden olusan bir otopark/plaka tanima sistemidir:
+
+  1) grpc_server/  : Python gRPC + Bilgisayarli Goru (CV) sunucusu (:50051)
+                     - YOLO (arac/slot tespiti), OCR (plaka okuma)
+                     - Kamera simulasyonu / RTSP kaynagi
+  2) src/main/java : Java Spring Boot backend (:8080)
+                     - REST API (frontend icin), gRPC istemcisi (Python'a)
+                     - Plaka takip, oturum/lifecycle, slot doluluk yonetimi
+  3) frontend/     : Expo / React Native mobil uygulama (:8081)
+                     - Giris/kayit, otopark durumu, rezervasyon, profil
+
+Iletisim: Frontend --REST--> Java --gRPC--> Python CV ; Java --HTTP--> kamera sim.
+
+
+================================================================================
+KRONOLOJIK KAYITLAR
+================================================================================
+
+--------------------------------------------------------------------------------
+[BASLANGIC] Projeyi calistirma ve GitHub'a tasima
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - Projenin nasil calistirilacagi incelendi (README, pom.xml, requirements.txt,
+   frontend/package.json). run.bat'in Windows'a ozel ve guncel yapiya uygun
+   olmadigi tespit edildi; macOS icin dogru calistirma komutlari verildi.
+ - Proje yeni bir ozel (private) GitHub reposu "parkomfyLast" altina pushlandi.
+ - Git is akisi anlatildi: arkadasin (Eren) branch'ini fetch/pull etme, local
+   degisiklikleri inceleme, gerektiginde stash/discard etme.
+Neden:
+ - Kullanici once projeyi ayaga kaldirmak ve surum kontrolu kurmak istedi.
+
+--------------------------------------------------------------------------------
+[DEBUG] "Spring Boot calismiyor olabilir" frontend hatasi
+--------------------------------------------------------------------------------
+Sorun:
+ - Backend ayakta olmasina ragmen frontend "Spring Boot calismiyor" uyarisi
+   veriyordu; parking/status 404 donuyordu.
+Kok neden:
+ - DatabaseManager bir placeholder'di; getArea() her zaman null donuyordu
+   (MySQL baglantisi/veri yoktu).
+Cozum:
+ - InMemoryParkingRepository olusturuldu (AREA-001/002/003 demo verisiyle).
+ - Spring bean (ParkomfySpringApplication) bu repoyu kullanacak sekilde ayarlandi
+   (daha sonra kullanici istegiyle DatabaseManager'a geri alindi).
+Etkilenen dosyalar:
+ - src/main/java/com/parkomfy/repository/InMemoryParkingRepository.java (yeni)
+ - src/main/java/com/parkomfy/ParkomfySpringApplication.java
+
+--------------------------------------------------------------------------------
+[DEBUG] Frontend hatalari (Expo)
+--------------------------------------------------------------------------------
+ - PluginError "@react-native-community/datetimepicker": eksik/eskimis node_modules.
+   Cozum: npm install + npx expo start -c.
+ - expo-notifications Android hatasi: Expo Go SDK 53+ Android'de push bildirimleri
+   kaldirildi. Cozum: frontend/src/config/notifications.js yeniden yazildi;
+   modul lazy yuklenir, Expo Go + Android'de init atlanir (iOS ve gercek build
+   etkilenmez).
+
+--------------------------------------------------------------------------------
+[OZELLIK] Turk plaka tanima sistemi - ilk surum (plan uygulamasi)
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - Demo/sahte OCR yerine gercek bir Turk plaka OCR pipeline'i kuruldu.
+ - Arac yasam dongusu tamamlandi: ENTERED -> PARKED -> LEAVING -> EXITED.
+ - Iki mod: giris/cikis icin yakin cekim, park icin tepeden gorus.
+Etkilenen dosyalar (Java):
+ - model/ParkingSession.java        : LEAVING durumu + isLeaving/isActiveOrLeaving
+ - util/PlateMatcher.java           : findBestMatch (bulanik eslestirme) + MatchResult
+ - service/DetectionService.java    : coklu-kare oylama, TR format dogrulama
+ - service/PlateTrackingService.java: processExit, handleSlotBecameEmpty
+ - service/OccupancySyncService.java: OCCUPIED->AVAILABLE gecisi LEAVING'e baglandi
+ - api/ParkingApiController.java     : processExitPlate
+ - controller/ParkingRestController : POST /api/v1/exit/plate
+ - api/ExitPlateResultDto.java      : cikis sonucu DTO (yeni)
+ - repository/IParkingRepository + DatabaseManager: LEAVING/aktif oturum sorgulari,
+   saveVehicle ON DUPLICATE KEY UPDATE exit_time
+Etkilenen dosyalar (Python):
+ - plate_reader.py    : plaka bolge tespiti + on isleme + EasyOCR + TR regex
+ - server.py          : DetectLicensePlate gercek guven skoru + plate_location
+ - camera_source.py   : CameraSource ABC, VideoFileSource, RtspSource (yeni)
+ - camera_simulator.py: yeni kamera kaynak katmanina uyarlandi
+ - eval_plates.py     : OCR dogruluk olcum scripti (yeni)
+
+--------------------------------------------------------------------------------
+[TEST] Mock fotograflarla OCR denemesi (plaka1.png, plaka2.png)
+--------------------------------------------------------------------------------
+Bulgu:
+ - EasyOCR + sezgisel lokalizasyon gercek fotograflarda zayif kaldi:
+   plaka1 (06 KES 78) -> "GKES78", plaka2 (50 UA 580) -> parcali "UA"/"580".
+ - Kok sorun tanima degil, kucuk plakayi yeterince iyi BULMA/yakinlastirma idi.
+ - Onemli not: plaka1'de "06"nin bas rakamini fiziksel olarak plaka cercevesi
+   kapatiyor; hicbir OCR bunu okuyamaz (pikselde yok).
+
+--------------------------------------------------------------------------------
+[KARAR/KAVRAM] Egitim gerekmiyor - OCR motorlari hazir gelir
+--------------------------------------------------------------------------------
+ - Kullanicinin sorusu uzerine netlestirildi: EasyOCR/PaddleOCR gibi OCR motorlari
+   ONCEDEN EGITILMIS gelir, metni egitim olmadan tanir. Bizim eksigimiz tanima
+   degil, kucuk plakayi iyi yakalamakti.
+
+--------------------------------------------------------------------------------
+[IYILESTIRME] PaddleOCR entegrasyonu (ana OCR motoru)
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - PaddleOCR (mobile det+rec modelleri) ana OCR motoru olarak plate_reader.py'a
+   eklendi. EasyOCR fallback olarak korundu (PARKOMFY_OCR_BACKEND=easyocr ile
+   elle de secilebilir). Fonksiyon imzalari DEGISMEDI -> Java/gRPC tarafi kirilmadi.
+ - requirements.txt'e paddleocr + paddlepaddle eklendi.
+ - Egitim YOK; modeller bir kez ~/.paddlex altina indi (cache).
+Test sonuclari (CPU):
+ - plaka2.png (50 UA 580) -> "50UA580" guven 0.96, ~205 ms  [BIREBIR DOGRU]
+ - plaka1.png (06 KES 78) -> "15KES78" guven 0.88, ~240 ms  [KES78 dogru, 06 kapali]
+Etkilenen dosyalar:
+ - grpc_server/plate_reader.py  (PaddleOCR backend, _paddle_pipeline, _poly_to_norm)
+ - grpc_server/requirements.txt
+
+--------------------------------------------------------------------------------
+[TEST] Video uzerinden uctan uca deneme (otopark_giris_video.mp4)
+--------------------------------------------------------------------------------
+Video: 1920x1080, 30 fps, 75 sn. Giris kamerasi senaryosu (beyaz Renault Clio).
+Yontem: ~2 kare/sn ornekleme + coklu-kare oylama.
+Sonuc:
+ - FINAL plaka: "34 EZS 794" -> 43 karede tutarli, ortalama guven 0.97 [DOGRU].
+ - Arac uzaktayken birkac gurultulu kare (34EZS199/34EZS19) oylama ile elendi.
+Hiz optimizasyonu:
+ - OCR oncesi 1280px ust-sinir kucultme eklendi (PARKOMFY_OCR_MAX_WIDTH).
+   1080p kare: 1019 ms -> 668 ms, dogruluk korunur. 1280 alti plaka cok kuculup
+   okunamiyor (960/720'de basarisiz), bu yuzden varsayilan 1280.
+Etkilenen dosyalar:
+ - grpc_server/plate_reader.py  (_OCR_MAX_WIDTH downscale)
+
+--------------------------------------------------------------------------------
+[CIKTI] Annotasyonlu demo video uretimi
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - otopark_giris_video.mp4 islenerek, tespit edilen plaka yesil kutu icine alindi
+   ve kutunun yanina plaka metni + guven skoru (% olarak) yazildi.
+ - Cikti: otopark_giris_annotated.mp4 (proje kok dizini).
+ - OCR her 5 karede bir calisir, tespit ~1 sn ekranda tutulur (akici gorunum).
+
+--------------------------------------------------------------------------------
+[ALTYAPI] Bu gunluk dosyasi olusturuldu (kaan_journal.txt)
+--------------------------------------------------------------------------------
+ - Kullanici istegiyle, agent'in projedeki tum calismalarini kayit altina almak
+   icin bu dosya olusturuldu. Bundan sonra her guncellemede buraya ekleme yapilacak.
+
+--------------------------------------------------------------------------------
+[TEST] Kisaltilmis video ile tekrar deneme + annotasyon
+--------------------------------------------------------------------------------
+ - Kullanici otopark_giris_video.mp4'u ayni isimle KISA versiyonla degistirdi
+   (75 sn -> 7.1 sn, 213 kare, 1920x1080).
+ - Tekrar islendi: plaka "34 EZS 794" 42 karede tutarli okundu, ort. guven 0.96.
+ - Annotasyonlu cikti yeniden uretildi: otopark_giris_annotated.mp4 (172 kare,
+   ~21 MB). Yesil kutu + "34 EZS 794 %99" etiketi dogru gorunuyor.
+ - Kisa video sayesinde uretim cok hizli (onceki 239 MB yerine 21 MB dosya).
+
+--------------------------------------------------------------------------------
+[DUZELTME] Video codec sorunu (Cursor/tarayicida acilmiyordu)
+--------------------------------------------------------------------------------
+Sorun:
+ - OpenCV VideoWriter 'mp4v' (MPEG-4 Part 2) ile yaziyordu; Cursor/tarayici
+   oynaticisi H.264 ister, bu yuzden "error loading video file" veriyordu.
+Cozum:
+ - Video H.264 ('avc1' fourcc) ile yeniden kodlandi. Boyut 21 MB -> 5.5 MB.
+ - NOT (gelecek): annotasyonlu video uretirken bastan 'avc1' kullan, 'mp4v' degil.
+
+================================================================================
+SON DURUM OZETI (guncel)
+================================================================================
+ - OCR: PaddleOCR (mobile) ana motor, EasyOCR fallback. TR plaka dogrulama aktif.
+ - Performans: 1280px kucultme ile ~670 ms/kare (1080p), ~205 ms (kucuk goruntu).
+ - Dogrulanan plakalar: 50 UA 580 (foto), 34 EZS 794 (video) - dogru.
+ - Java lifecycle (ENTERED->PARKED->LEAVING->EXITED) ve /exit/plate ucu hazir.
+ - Henuz git'e pushlanmadi (kullanici istegiyle bekletiliyor).
+ - Gelecek: videoyu kamera simulatorune baglayip uctan uca giris->bariyer akisi;
+   istege bagli egitilmis plaka-tespit YOLO modeli; gercek RTSP kamera.
+================================================================================

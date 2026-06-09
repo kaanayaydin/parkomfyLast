@@ -497,7 +497,7 @@ public class DatabaseManager implements IParkingRepository {
         }
         try (PreparedStatement ps = connection.prepareStatement(
                 "INSERT INTO vehicles (vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id) " +
-                "VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), exit_time = NULL")) {
+                "VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), exit_time = VALUES(exit_time)")) {
             ps.setString(1, vehicle.getVehicleId());
             ps.setString(2, normalizePlate(vehicle.getLicensePlate()));
             ps.setString(3, vehicle.getVehicleType() != null ? vehicle.getVehicleType().name() : "CAR");
@@ -681,6 +681,47 @@ public class DatabaseManager implements IParkingRepository {
             System.err.println("getActiveSessionByPlate failed: " + e.getMessage());
         }
         return null;
+    }
+
+    @Override
+    public ParkingSession getLeavingOrActiveSessionByPlate(String normalizedPlate) {
+        if (useDemoData) {
+            return demoSessions.stream()
+                .filter(s -> s.isActiveOrLeaving() && s.getVehicle() != null && s.getVehicle().getLicensePlate() != null
+                    && normalizePlate(s.getVehicle().getLicensePlate()).equals(normalizedPlate))
+                .findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT session_id, vehicle_id, slot_id, area_id, license_plate, entry_time, exit_time, status " +
+                "FROM parking_sessions WHERE license_plate = ? AND status IN ('ACTIVE','LEAVING') " +
+                "ORDER BY CASE status WHEN 'LEAVING' THEN 0 ELSE 1 END LIMIT 1")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapSession(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getLeavingOrActiveSessionByPlate failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public List<ParkingSession> getLeavingSessions() {
+        if (useDemoData) {
+            return demoSessions.stream()
+                .filter(ParkingSession::isLeaving)
+                .collect(java.util.stream.Collectors.toList());
+        }
+        List<ParkingSession> list = new ArrayList<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT session_id, vehicle_id, slot_id, area_id, license_plate, entry_time, exit_time, status " +
+                 "FROM parking_sessions WHERE status = 'LEAVING' ORDER BY entry_time DESC")) {
+            while (rs.next()) list.add(mapSession(rs));
+        } catch (SQLException e) {
+            System.err.println("getLeavingSessions failed: " + e.getMessage());
+        }
+        return list;
     }
     
     @Override

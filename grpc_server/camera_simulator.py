@@ -228,12 +228,38 @@ def start_camera_simulation(video_path=None):
     global _simulator, _current_video_name
     if _simulator is not None:
         return _simulator
+    rtsp = os.environ.get("PARKOMFY_RTSP_URL", "").strip()
+    if rtsp:
+        try:
+            from camera_source import RtspSource
+            _simulator = _RtspAdapter(RtspSource(rtsp))
+            _current_video_name = "rtsp:" + rtsp
+            _simulator.start()
+            return _simulator
+        except Exception as e:
+            logger.warning("RTSP source failed, falling back to video: %s", e)
     env = os.environ.get("PARKOMFY_CAMERA_VIDEO")
     path = _resolve_video_path(video_path or env or "loop1")
     _current_video_name = path.name
     _simulator = CameraSimulator(str(path))
     _simulator.start()
     return _simulator
+
+
+class _RtspAdapter:
+    """Thin wrapper so RTSP source matches CameraSimulator interface."""
+
+    def __init__(self, source):
+        self._source = source
+
+    def start(self):
+        self._source.start()
+
+    def stop(self):
+        self._source.stop()
+
+    def get_snapshot(self) -> bytes:
+        return self._source.get_snapshot_jpeg()
 
 
 def start_http_server():

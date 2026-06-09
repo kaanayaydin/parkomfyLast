@@ -1,5 +1,8 @@
 package com.parkomfy.util;
 
+import java.util.List;
+import java.util.function.Function;
+
 /**
  * Fuzzy license plate matching for OCR tolerance.
  */
@@ -26,6 +29,54 @@ public final class PlateMatcher {
 
     public static boolean matches(String detected, String expected, double threshold) {
         return similarity(detected, expected) >= threshold;
+    }
+
+    /**
+     * Pick best candidate plate from a list (overhead security camera mode).
+     */
+    public static <T> MatchResult<T> findBestMatch(
+            String detectedPlate,
+            List<T> candidates,
+            Function<T, String> plateExtractor,
+            double threshold) {
+        if (detectedPlate == null || detectedPlate.isBlank() || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        String det = normalize(detectedPlate);
+        T bestItem = null;
+        double bestScore = 0.0;
+        String bestPlate = null;
+        for (T c : candidates) {
+            if (c == null) continue;
+            String plate = plateExtractor.apply(c);
+            if (plate == null || plate.isBlank()) continue;
+            double score = similarity(det, plate);
+            if (score > bestScore) {
+                bestScore = score;
+                bestItem = c;
+                bestPlate = normalize(plate);
+            }
+        }
+        if (bestItem == null || bestScore < threshold) {
+            return null;
+        }
+        return new MatchResult<>(bestItem, bestPlate, bestScore);
+    }
+
+    public static final class MatchResult<T> {
+        private final T item;
+        private final String matchedPlate;
+        private final double score;
+
+        public MatchResult(T item, String matchedPlate, double score) {
+            this.item = item;
+            this.matchedPlate = matchedPlate;
+            this.score = score;
+        }
+
+        public T getItem() { return item; }
+        public String getMatchedPlate() { return matchedPlate; }
+        public double getScore() { return score; }
     }
 
     private static int levenshtein(String a, String b) {

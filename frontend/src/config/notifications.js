@@ -1,34 +1,55 @@
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { registerPushToken } from './api';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Expo Go (SDK 53+) removed Android remote push support; statically importing
+// expo-notifications there throws at load time. We lazily require it and skip
+// entirely on Expo Go + Android so the app runs without the console error.
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+const pushSupported = !(isExpoGo && Platform.OS === 'android');
+
+let Notifications = null;
+let handlerSet = false;
+
+function getNotifications() {
+  if (!pushSupported) return null;
+  if (!Notifications) {
+    Notifications = require('expo-notifications');
+    if (!handlerSet) {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+        }),
+      });
+      handlerSet = true;
+    }
+  }
+  return Notifications;
+}
 
 export async function setupPushNotifications(userId) {
   if (!userId) return null;
+  const N = getNotifications();
+  if (!N) return null;
   try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
+    const { status: existing } = await N.getPermissionsAsync();
     let finalStatus = existing;
     if (existing !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await N.requestPermissionsAsync();
       finalStatus = status;
     }
     if (finalStatus !== 'granted') return null;
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('parkomfy', {
+      await N.setNotificationChannelAsync('parkomfy', {
         name: 'PARKOMFY',
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: N.AndroidImportance.HIGH,
       });
     }
 
-    const tokenData = await Notifications.getExpoPushTokenAsync();
+    const tokenData = await N.getExpoPushTokenAsync();
     const token = tokenData.data;
     await registerPushToken(userId, token);
     return token;
@@ -39,6 +60,8 @@ export async function setupPushNotifications(userId) {
 }
 
 export function addNotificationListener(handler) {
-  const sub = Notifications.addNotificationReceivedListener(handler);
+  const N = getNotifications();
+  if (!N) return () => {};
+  const sub = N.addNotificationReceivedListener(handler);
   return () => sub.remove();
 }

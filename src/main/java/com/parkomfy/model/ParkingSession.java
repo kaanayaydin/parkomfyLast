@@ -87,6 +87,14 @@ public class ParkingSession {
     public boolean isActive() {
         return status == SessionStatus.ACTIVE;
     }
+
+    public boolean isLeaving() {
+        return status == SessionStatus.LEAVING;
+    }
+
+    public boolean isActiveOrLeaving() {
+        return status == SessionStatus.ACTIVE || status == SessionStatus.LEAVING;
+    }
     
     public void complete() {
         this.exitTime = LocalDateTime.now();
@@ -112,6 +120,7 @@ public class ParkingSession {
      */
     public enum SessionStatus {
         ACTIVE,
+        LEAVING,
         COMPLETED,
         CANCELLED
     }

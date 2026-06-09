@@ -83,10 +83,17 @@ public class OccupancySyncService {
                 }
                 plateSimulationService.assignPlateToOccupiedSlot(dbSlot, areaId);
             } else {
-                ParkingSession session = repository.getActiveSessionForSlot(dbSlot.getSlotId());
-                if (session == null && dbSlot.getStatus() == ParkingSlot.SlotStatus.OCCUPIED) {
-                    dbSlot.vacate();
-                    repository.updateSlot(dbSlot);
+                if (dbSlot.getStatus() == ParkingSlot.SlotStatus.OCCUPIED) {
+                    ParkingSession session = repository.getActiveSessionForSlot(dbSlot.getSlotId());
+                    if (session != null) {
+                        session.setStatus(ParkingSession.SessionStatus.LEAVING);
+                        repository.updateSession(session);
+                        dbSlot.vacate();
+                        repository.updateSlot(dbSlot);
+                    } else {
+                        dbSlot.vacate();
+                        repository.updateSlot(dbSlot);
+                    }
                 }
             }
         }

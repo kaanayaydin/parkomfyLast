@@ -274,10 +274,18 @@ public class DetectionService implements IDetectionService {
         double detectionConfidence = yoloInference.getConfidence();
 
         if (licensePlateText != null && !licensePlateText.isEmpty()) {
-            boolean isValid = licensePlateReader.validateLicensePlateFormat(licensePlateText, "TR");
-            if (!isValid) {
-                CVFailureLog.logFailure(CVFailureLog.FailureCategory.OCR_MISREAD,
-                        "Invalid plate format: " + licensePlateText, camera.getCameraId(), null, "TR");
+            String upper = licensePlateText.toUpperCase();
+            if (upper.contains("TESPIT") || upper.equals("YABANCI")) {
+                licensePlateText = null;
+                detectionConfidence = 0.0;
+            } else {
+                boolean isValid = licensePlateReader.validateLicensePlateFormat(licensePlateText, "TR");
+                if (!isValid) {
+                    CVFailureLog.logFailure(CVFailureLog.FailureCategory.OCR_MISREAD,
+                            "Invalid plate format: " + licensePlateText, camera.getCameraId(), null, "TR");
+                    licensePlateText = null;
+                    detectionConfidence = 0.0;
+                }
             }
         }
 

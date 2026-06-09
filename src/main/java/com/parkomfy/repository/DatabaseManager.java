@@ -174,7 +174,8 @@ public class DatabaseManager implements IParkingRepository {
     private void seedMysqlData(Statement stmt) throws SQLException {
         stmt.executeUpdate(
             "INSERT INTO users (user_id, email, password_hash, full_name, license_plate, role) VALUES " +
-            "('USR-ADMIN', 'admin', '" + com.parkomfy.service.AuthService.hashPassword("1234") + "', " +
+            "('USR-ADMIN', 'admin', '" + com.parkomfy.service.AuthService.hashPassword(
+                com.parkomfy.service.AuthService.defaultAdminPassword()) + "', " +
             "'Yönetici', '34 OZU 450', 'ADMIN') " +
             "ON DUPLICATE KEY UPDATE role='ADMIN', full_name='Yönetici'");
         stmt.executeUpdate(
@@ -183,7 +184,8 @@ public class DatabaseManager implements IParkingRepository {
 
     private void seedDemoUsers() {
         User admin = new User("USR-ADMIN", "admin", null, "Yönetici");
-        admin.setPasswordHash(com.parkomfy.service.AuthService.hashPassword("1234"));
+        admin.setPasswordHash(com.parkomfy.service.AuthService.hashPassword(
+            com.parkomfy.service.AuthService.defaultAdminPassword()));
         admin.setLicensePlate("34 OZU 450");
         admin.setRole("ADMIN");
         demoUsers.put("admin", admin);

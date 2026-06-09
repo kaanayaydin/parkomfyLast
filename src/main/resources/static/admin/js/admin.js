@@ -1,5 +1,35 @@
 const API = `${window.location.origin}/api/v1`;
+const AUTH_KEY = 'parkomfy_admin_token';
 const SNAPSHOT_URL = `${API}/camera/live/snapshot`;
+
+function getAdminToken() {
+  return sessionStorage.getItem(AUTH_KEY);
+}
+
+function setAdminToken(token) {
+  if (token) sessionStorage.setItem(AUTH_KEY, token);
+  else sessionStorage.removeItem(AUTH_KEY);
+}
+
+async function ensureAdminLogin() {
+  if (getAdminToken()) return true;
+  const email = window.prompt('Admin e-posta:', 'admin');
+  if (!email) return false;
+  const password = window.prompt('Admin şifre:');
+  if (!password) return false;
+  const res = await fetch(`${API}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (data.success && data.data?.token) {
+    setAdminToken(data.data.token);
+    return true;
+  }
+  alert(data.message || 'Admin girişi başarısız');
+  return false;
+}
 function snapshotUrlForLot(lotKey) {
   const lot = (lotKey || 'loop1').replace('.mp4', '');
   return `${SNAPSHOT_URL}?lot=${encodeURIComponent(lot)}`;
@@ -32,6 +62,11 @@ function toast(msg) {
 }
 
 async function api(path, opts = {}) {
+  if (path.startsWith('/admin')) {
+    const ok = await ensureAdminLogin();
+    if (!ok) throw new Error('Admin girişi gerekli');
+    opts.headers = { ...(opts.headers || {}), 'X-Auth-Token': getAdminToken() };
+  }
   const res = await fetch(`${API}${path}`, opts);
   return res.json();
 }

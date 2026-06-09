@@ -94,6 +94,13 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- BCrypt password hashing (no full Spring Security filter chain) -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+            <version>5.7.12</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -159,6 +166,13 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- Unit tests (src/test/java) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
             </plugin>
 
             <!-- Spring Boot Maven Plugin -->

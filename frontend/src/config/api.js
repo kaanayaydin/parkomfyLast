@@ -31,6 +31,20 @@ export const API_HOST = resolveApiHost();
 export const API_BASE = `http://${API_HOST}:8080/api/v1`;
 export const WS_URL = `ws://${API_HOST}:8080/ws/parking`;
 
+let authToken = null;
+
+export function setAuthToken(token) {
+  authToken = token || null;
+}
+
+function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (authToken) {
+    headers['X-Auth-Token'] = authToken;
+  }
+  return headers;
+}
+
 export const AREA_IDS = {
   istasyon1: 'AREA-001',
   istasyon2: 'AREA-002',
@@ -191,6 +205,15 @@ export async function loginUser(email, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
+  const json = await res.json();
+  if (json.success && json.data?.token) {
+    setAuthToken(json.data.token);
+  }
+  return json;
+}
+
+export async function getKvkkText() {
+  const res = await fetch(`${API_BASE}/legal/kvkk`);
   return res.json();
 }
 
@@ -264,17 +287,23 @@ export async function registerPushToken(userId, expoPushToken) {
 export async function getAdminReservations(areaId) {
   let url = `${API_BASE}/admin/reservations`;
   if (areaId) url += `?areaId=${encodeURIComponent(areaId)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeaders() });
   return res.json();
 }
 
 export async function getAdminSessions(areaId) {
-  const res = await fetch(`${API_BASE}/admin/sessions?areaId=${encodeURIComponent(areaId)}`);
+  const res = await fetch(
+    `${API_BASE}/admin/sessions?areaId=${encodeURIComponent(areaId)}`,
+    { headers: authHeaders() }
+  );
   return res.json();
 }
 
 export async function getAdminDetections(areaId) {
-  const res = await fetch(`${API_BASE}/admin/detections?areaId=${encodeURIComponent(areaId)}`);
+  const res = await fetch(
+    `${API_BASE}/admin/detections?areaId=${encodeURIComponent(areaId)}`,
+    { headers: authHeaders() }
+  );
   return res.json();
 }
 
@@ -300,7 +329,7 @@ export function connectParkingWebSocket(onMessage) {
 }
 
 export async function listParkingAreas() {
-  const res = await fetch(`${API_BASE}/admin/parking-areas`);
+  const res = await fetch(`${API_BASE}/admin/parking-areas`, { headers: authHeaders() });
   return res.json();
 }
 
@@ -313,7 +342,7 @@ export async function getPublicParkingAreas() {
 export async function createParkingArea({ areaName, address, lotKey }) {
   const res = await fetch(`${API_BASE}/admin/parking-areas`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ areaName, address, lotKey }),
   });
   return res.json();
@@ -347,6 +376,7 @@ export async function predictSlotLayout(imageUri) {
   form.append('image', { uri: imageUri, name: 'layout.jpg', type: 'image/jpeg' });
   const res = await fetch(`${API_BASE}/admin/parking-areas/predict-slots`, {
     method: 'POST',
+    headers: authHeaders(),
     body: form,
   });
   return res.json();
@@ -355,7 +385,7 @@ export async function predictSlotLayout(imageUri) {
 export async function saveSlotCalibration(payload) {
   const res = await fetch(`${API_BASE}/admin/parking-areas/calibrate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   return res.json();

@@ -473,6 +473,29 @@ Sadece Expo reload yeterli (LiveCameraView + AdminDetailScreen frontend).
 Python serve width (640) ve Spring seed (AREA-004) onceki adimdan; degismediyse
  tekrar baslatmaya gerek yok.
 
+--------------------------------------------------------------------------------
+[OLCUM ARACLARI] Performans metrikleri (latency/FPS/accuracy/precision-recall)
+--------------------------------------------------------------------------------
+Amac: rapordaki accuracy/precision/recall/latency/FPS iddialarini kanitlamak.
+Eklenen dosyalar (grpc_server/):
+ - benchmark.py: OTOMATIK latency + FPS (etiket gerekmez). OCR ve slot doluluk
+   icin videodan kare ornekler, mean/median/p95/min/max ms + FPS raporlar.
+ - eval_slots.py: slot precision/recall/F1/accuracy. 'predict' videodan tahmin
+   CSV'si uretir; 'truth_occupied' elle doldurulur; 'score' confusion matrix +
+   metrik hesaplar. Pozitif sinif=DOLU. AREA-004 kalibrasyonu kullanir.
+ - eval_plates.py: (zaten vardi) OCR accuracy; --dir gorseller + --labels CSV.
+ILK GERCEK OLCUM (benchmark.py -n 20, CPU, GPU yok):
+ - Slot doluluk (AREA-004, loop1): mean 29.3 ms -> ~34 FPS, 3 slot. SAGLAM.
+ - Plaka OCR (giris video tam kare 1920px): mean 1144 ms (~0.9 FPS),
+   13/18 karede plaka okundu. NOT: annotated stream 900px'e kuculttugu icin
+   gercekte ~384 ms (~2.6 FPS) - bkz onceki _ocrspeed olcumu.
+Kullanim:
+  ./.venv/bin/python benchmark.py -n 30
+  ./.venv/bin/python eval_slots.py predict --video ../loop1.mp4 --n 20 \
+       --save-frames eval_frames --out slots_pred.csv   # sonra truth doldur
+  ./.venv/bin/python eval_slots.py score --csv slots_pred.csv
+  ./.venv/bin/python eval_plates.py --dir test_plates --labels labels.csv
+
 ================================================================================
 SON DURUM OZETI (guncel)
 ================================================================================
@@ -483,4 +506,49 @@ SON DURUM OZETI (guncel)
  - Henuz git'e pushlanmadi (kullanici istegiyle bekletiliyor).
  - Gelecek: videoyu kamera simulatorune baglayip uctan uca giris->bariyer akisi;
    istege bagli egitilmis plaka-tespit YOLO modeli; gercek RTSP kamera.
+================================================================================
+
+== Overhead OCR: sahte plaka fallback'i kaldirildi (gercek OCR + guven esigi) ==
+ - IYOLOInference: PlateRead (metin + guven) ve readPlateFromCrop() eklendi.
+ - YOLOInference: readPlateFromCrop gercek gRPC guven skorunu dondurur.
+ - OccupancySyncService.assignPlateFromHybridDetection: artik PlateSimulationService
+   ile sahte plaka (34 PGZ 545 / 67 ACP 810) ATAMIYOR. Arac kirpimini gercek OCR ile
+   okur; plaka gecerli VE guven >= MIN_PLATE_CONF (0.55) ise gercek plakayi atar.
+   Okuyamazsa slot DOLU kalir, plaka bos; her sync karesinde tekrar denenir (arac
+   netlesince gercek plaka otomatik yazilir).
+ - Test (loop1 kareleri): one donuk siyah arac 67 ACP 810 -> %97-99 gercek okuma.
+   Acili/uzak beyaz arac (34 PGZ 545) -> cogu karede okunamiyor (fiziksel limit).
+ - PlateSimulationService.assignPlateToOccupiedSlot artik kullanilmiyor (dead code,
+   getOrCreateVehicle ve seed hala kullaniliyor). Java temiz derlendi.
+================================================================================
+
+== Madde 8 (Testler) + Madde 10 (Guvenlik/KVKK) ==
+ - pom.xml: maven-surefire-plugin + spring-security-crypto (BCrypt).
+ - src/test/java: PlateMatcherTest, PricingPolicyTest, AuthServiceTest (mvn test yesil).
+ - AuthService: BCrypt hash + legacy SHA-256 uyumluluk; login token (UUID) uretimi.
+ - AdminAuthFilter: /api/v1/admin/* icin X-Auth-Token zorunlu (ADMIN rolu).
+ - UserDto.token; ParkomfySpringApplication FilterRegistrationBean + env MYSQL_*.
+ - DatabaseManager admin seed: PARKOMFY_ADMIN_PASSWORD env (default 1234).
+ - LegalRestController: GET /api/v1/legal/kvkk aydinlatma metni.
+ - frontend api.js: setAuthToken, authHeaders, admin cagrilarina token; getKvkkText.
+ - RegisterScreen: KVKK onay kutusu + modal; kayit icin zorunlu.
+ - static admin.js: sessionStorage token + admin login prompt.
+ - SECURITY.md: yapilanlar + TLS/tam yetkilendirme gelecek is notu.
+================================================================================
+
+== Akici kamera: MJPEG akisi + dengeli kalite ==
+ - Java: proxyMjpegStream(lotKey) -> /live.mjpg?lot=; GET /camera/live/stream?lot=
+ - Python: CameraSimulator _SERVE_WIDTH=960 q80; Annotated 960 q80; MJPEG sleep 0.05 (~20fps).
+ - frontend: react-native-webview; getLiveCameraStreamUrl(); LiveCameraView WebView MJPEG.
+ - app.json: android usesCleartextTraffic=true (LAN HTTP stream).
+ - Snapshot endpoint korundu (OccupancySync + web admin).
+================================================================================
+
+== GERI ALINDI: MJPEG (WebView'de ekranlar yine simsiyah oldu) ==
+ - LiveCameraView.js: snapshot polling double-buffer haline donduruldu (intervalMs=350).
+ - camera_simulator.py: Annotated 640/q72, base full-res q82, MJPEG sleep 0.08.
+ - Java: proxyMjpegStream lot parametresi ve /camera/live/stream?lot= geri alindi.
+ - app.json usesCleartextTraffic kaldirildi; api.js getLiveCameraStreamUrl kaldirildi.
+ - react-native-webview kaldirildi (npm uninstall).
+ - Karar: dusuk fps snapshot yontemi korunuyor, kamera akiciligi gelistirilmeyecek.
 ================================================================================

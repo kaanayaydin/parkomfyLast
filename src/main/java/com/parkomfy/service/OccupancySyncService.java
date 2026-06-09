@@ -22,6 +22,7 @@ import java.util.Map;
 public class OccupancySyncService {
 
     private static final double MIN_OCC_CONF = 0.25;
+    private static final double MIN_PLATE_CONF = 0.55;
 
     private final IParkingRepository repository;
     private final IYOLOInference yoloInference;
@@ -220,35 +221,40 @@ public class OccupancySyncService {
 
     private void assignPlateFromHybridDetection(ParkingSlot slot, String areaId,
                                                 byte[] frame, ParkingSlotResultDto det) {
-        String plateText = null;
-        if (det != null && det.hasVehicleBBox()) {
-            byte[] crop = FrameCropUtil.cropNormalizedJpeg(
-                frame,
-                det.getVehicleX(),
-                det.getVehicleY(),
-                det.getVehicleWidth(),
-                det.getVehicleHeight()
-            );
-            if (crop != null) {
-                plateText = yoloInference.detectLicensePlateFromCrop(crop, slot.getSlotNumber());
-            }
+        // Araç kutusu yoksa gerçek OCR yapılamaz; sahte plaka uydurmayız,
+        // slot DOLU kalır ve bir sonraki karede tekrar denenir.
+        if (det == null || !det.hasVehicleBBox()) {
+            return;
         }
-
-        if (isValidPlate(plateText)) {
-            String formatted = formatPlateForDisplay(plateText);
-            Vehicle vehicle = plateSimulationService.getOrCreateVehicle(formatted);
-            if (slot.isAvailable()) {
-                slot.occupy(vehicle);
-            } else {
-                slot.setCurrentVehicle(vehicle);
-            }
-            ParkingSession session = new ParkingSession(vehicle, slot);
-            repository.saveSession(session);
-            repository.updateSlot(slot);
+        byte[] crop = FrameCropUtil.cropNormalizedJpeg(
+            frame,
+            det.getVehicleX(),
+            det.getVehicleY(),
+            det.getVehicleWidth(),
+            det.getVehicleHeight()
+        );
+        if (crop == null) {
             return;
         }
 
-        plateSimulationService.assignPlateToOccupiedSlot(slot, areaId);
+        IYOLOInference.PlateRead read = yoloInference.readPlateFromCrop(crop, slot.getSlotNumber());
+
+        // Gerçek OCR güvenli okuyamadıysa: sahte plaka ATAMA. Slot DOLU kalır,
+        // plaka boş gösterilir; araç netleşince sonraki karelerde gerçek plaka yazılır.
+        if (read == null || !isValidPlate(read.text) || read.confidence < MIN_PLATE_CONF) {
+            return;
+        }
+
+        String formatted = formatPlateForDisplay(read.text);
+        Vehicle vehicle = plateSimulationService.getOrCreateVehicle(formatted);
+        if (slot.isAvailable()) {
+            slot.occupy(vehicle);
+        } else {
+            slot.setCurrentVehicle(vehicle);
+        }
+        ParkingSession session = new ParkingSession(vehicle, slot);
+        repository.saveSession(session);
+        repository.updateSlot(slot);
     }
 
     private static boolean isValidPlate(String plateText) {

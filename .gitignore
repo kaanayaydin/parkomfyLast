@@ -66,6 +66,16 @@ grpc_server/slots_*.jpg
 # ML weights & demo videos (too large for GitHub; set PARKOMFY_SLOT_MODEL locally)
 *.pt
 *.mp4
+*.mov
+
+# Report drafts / large docs
+*.pdf
+
+# Evaluation & debug outputs (generated, not source)
+grpc_server/eval_frames/
+grpc_server/chk_*.jpg
+grpc_server/eval_montage.jpg
+grpc_server/slots_*.csv
 
 # Others
 *.log

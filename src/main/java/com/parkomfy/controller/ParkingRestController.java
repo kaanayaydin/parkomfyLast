@@ -15,6 +15,7 @@ import com.parkomfy.service.AuthService;
 import com.parkomfy.service.CameraSimulationService;
 import com.parkomfy.service.IDetectionService;
 import com.parkomfy.service.ParkingEventBroadcaster;
+import com.parkomfy.repository.IParkingRepository;
 
 import javax.imageio.ImageIO;
 import javax.imageio.IIOImage;
@@ -57,6 +58,9 @@ public class ParkingRestController {
 
     @Autowired
     private CameraSimulationService cameraSimulationService;
+
+    @Autowired
+    private IParkingRepository parkingRepository;
     
     // ============================================
     // AUTH ENDPOINTS
@@ -103,6 +107,13 @@ public class ParkingRestController {
         return ResponseEntity
             .status(response.getStatusCode())
             .body(response);
+    }
+
+    @GetMapping("/admin/live-hybrid")
+    public ResponseEntity<ApiResponse<LiveParkingStatusDto>> getLiveHybridStatus(
+            @RequestParam String areaId) {
+        ApiResponse<LiveParkingStatusDto> response = apiController.getLiveHybridStatus(areaId);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
     }
 
     @GetMapping("/parking/live")
@@ -169,8 +180,9 @@ public class ParkingRestController {
     }
 
     @GetMapping(value = "/camera/live/snapshot", produces = MediaType.IMAGE_JPEG_VALUE)
-    public ResponseEntity<byte[]> getLiveCameraSnapshot() {
-        byte[] frame = cameraSimulationService.getLiveSnapshot();
+    public ResponseEntity<byte[]> getLiveCameraSnapshot(
+            @RequestParam(required = false) String lot) {
+        byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lot);
         if (frame == null || frame.length == 0) {
             return ResponseEntity.status(503).build();
         }
@@ -181,8 +193,9 @@ public class ParkingRestController {
     }
 
     @PostMapping("/camera/live/predict-slots")
-    public ResponseEntity<ApiResponse<SlotPredictionResultDto>> predictSlotsFromLiveCamera() {
-        byte[] frame = cameraSimulationService.getLiveSnapshot();
+    public ResponseEntity<ApiResponse<SlotPredictionResultDto>> predictSlotsFromLiveCamera(
+            @RequestParam(required = false) String lot) {
+        byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lot);
         if (frame == null || frame.length == 0) {
             return ResponseEntity.status(503)
                 .body(ApiResponse.error("Canlı kamera karesi alınamadı. server.py çalışıyor mu?", 503));
@@ -193,7 +206,7 @@ public class ParkingRestController {
 
     @PostMapping("/camera/live/scan")
     public ResponseEntity<ApiResponse<ParkingScanResultDto>> scanLiveCamera(@RequestParam String areaId) {
-        byte[] frame = cameraSimulationService.getLiveSnapshot();
+        byte[] frame = cameraSimulationService.getLiveSnapshotForLot(parkingRepository.getLotKey(areaId));
         if (frame == null || frame.length == 0) {
             return ResponseEntity.status(503)
                 .body(ApiResponse.error("Canlı kamera karesi alınamadı", 503));
@@ -281,6 +294,17 @@ public class ParkingRestController {
     public ResponseEntity<ApiResponse<List<ReservationDto>>> getReservations(
             @RequestParam String licensePlate) {
         ApiResponse<List<ReservationDto>> response = apiController.getReservations(licensePlate);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
+    }
+
+    /**
+     * POST /api/v1/parking/reservations/{reservationId}/cancel?licensePlate=...
+     */
+    @PostMapping("/parking/reservations/{reservationId}/cancel")
+    public ResponseEntity<ApiResponse<ReservationDto>> cancelReservation(
+            @PathVariable String reservationId,
+            @RequestParam String licensePlate) {
+        ApiResponse<ReservationDto> response = apiController.cancelReservation(reservationId, licensePlate);
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
     
@@ -417,7 +441,7 @@ public class ParkingRestController {
 
     @GetMapping("/admin/reservations")
     public ResponseEntity<ApiResponse<List<ReservationDto>>> getAdminReservations(
-            @RequestParam String areaId) {
+            @RequestParam(required = false) String areaId) {
         ApiResponse<List<ReservationDto>> response = apiController.getAdminReservations(areaId);
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
@@ -452,6 +476,12 @@ public class ParkingRestController {
     public ResponseEntity<ApiResponse<ParkingAreaDto>> createParkingArea(
             @RequestBody CreateParkingAreaRequest request) {
         ApiResponse<ParkingAreaDto> response = apiController.createParkingArea(request);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
+    }
+
+    @PostMapping("/admin/parking-areas/reset")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> resetParkingData() {
+        ApiResponse<Map<String, Object>> response = apiController.resetParkingData();
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
 

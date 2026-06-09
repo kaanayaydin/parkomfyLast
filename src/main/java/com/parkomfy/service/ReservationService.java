@@ -85,4 +85,26 @@ public class ReservationService {
     public List<SlotReservation> getReservationsByPlate(String licensePlate) {
         return repository.getReservationsByPlate(licensePlate);
     }
+
+    public SlotReservation cancelReservation(String reservationId, String licensePlate) {
+        if (reservationId == null || reservationId.isBlank()) {
+            throw new IllegalArgumentException("reservationId is required");
+        }
+        if (licensePlate == null || licensePlate.isBlank()) {
+            throw new IllegalArgumentException("licensePlate is required");
+        }
+        SlotReservation reservation = repository.getReservation(reservationId);
+        if (reservation == null) {
+            throw new IllegalArgumentException("Reservation not found");
+        }
+        if (!reservation.getLicensePlate().equalsIgnoreCase(licensePlate.trim())) {
+            throw new IllegalArgumentException("Reservation does not belong to this license plate");
+        }
+        if (reservation.getStatus() != SlotReservation.ReservationStatus.RESERVED) {
+            throw new IllegalStateException("Only active reservations can be cancelled");
+        }
+        reservation.setStatus(SlotReservation.ReservationStatus.CANCELLED);
+        repository.updateReservation(reservation);
+        return reservation;
+    }
 }

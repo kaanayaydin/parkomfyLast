@@ -5,39 +5,59 @@ import {
 import LiveCameraView from '../components/LiveCameraView';
 import {
   API_HOST,
-  AREA_IDS,
   getLiveParkingStatus,
   getLiveImageUrl,
   getAdminReservations,
   getAdminSessions,
-  getAdminDetections,
   scanLiveCamera,
   mergedStatusColor,
   formatDateTime,
+  reservationStatusLabel,
 } from '../config/api';
 
 const AdminDetailScreen = ({ otopark, onBack }) => {
-  const areaId = otopark.areaId || AREA_IDS[otopark.id] || 'AREA-001';
+  const areaId = otopark.areaId;
+  const lotKey = otopark.lotKey || 'loop1';
   const [live, setLive] = useState(null);
   const [reservations, setReservations] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [detections, setDetections] = useState([]);
   const [imageKey, setImageKey] = useState(Date.now());
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     try {
-      const [liveRes, resRes, sessRes, detRes] = await Promise.all([
+      const [liveRes, resRes, sessRes] = await Promise.all([
         getLiveParkingStatus(areaId),
         getAdminReservations(areaId),
         getAdminSessions(areaId),
-        getAdminDetections(areaId),
       ]);
-      if (liveRes.success) setLive(liveRes.data);
+      if (liveRes.success) {
+        const reservationPlateBySlot = {};
+        (resRes.success ? resRes.data || [] : []).forEach((r) => {
+          if (r.slotId && r.licensePlate && (r.status === 'RESERVED' || r.status === 'ACTIVE')) {
+            reservationPlateBySlot[r.slotId] = r.licensePlate;
+          }
+        });
+        const sessionPlateBySlot = {};
+        (sessRes.success ? sessRes.data || [] : []).forEach((s) => {
+          if (s.slotId && s.licensePlate) sessionPlateBySlot[s.slotId] = s.licensePlate;
+        });
+        const slots = (liveRes.data.slots || []).map((s) => {
+          const showPlate = s.mergedStatus === 'OCCUPIED' || s.mergedStatus === 'RESERVED';
+          let plate = null;
+          if (showPlate) {
+            plate = s.licensePlate
+              || (s.mergedStatus === 'RESERVED' ? reservationPlateBySlot[s.slotId] : null)
+              || sessionPlateBySlot[s.slotId]
+              || null;
+          }
+          return { ...s, licensePlate: plate };
+        });
+        setLive({ ...liveRes.data, slots });
+      }
       if (resRes.success) setReservations(resRes.data || []);
       if (sessRes.success) setSessions(sessRes.data || []);
-      if (detRes.success) setDetections(detRes.data || []);
     } catch (e) {
       console.log('Admin load failed:', e.message);
     } finally {
@@ -69,34 +89,57 @@ const AdminDetailScreen = ({ otopark, onBack }) => {
     }
   };
 
+  const slotLabel = (s) => s.displayLabel || (s.mergedStatus === 'AVAILABLE' ? 'BOŞ' : s.mergedStatus);
+
   return (
     <ScrollView style={styles.container}>
       <TouchableOpacity onPress={onBack}>
         <Text style={styles.back}>← Geri</Text>
       </TouchableOpacity>
       <Text style={styles.title}>{otopark.name}</Text>
-      <Text style={styles.sub}>Admin · {areaId} · {API_HOST}:8080</Text>
+      <Text style={styles.sub}>Admin · {areaId} · {lotKey} · {API_HOST}:8080</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Canlı Otopark Kamerası</Text>
+        <LiveCameraView lotKey={lotKey} height={220} label={`Canlı Kamera (${lotKey})`} />
+      </View>
 
       {loading ? (
         <ActivityIndicator size="large" color="#1A237E" style={{ marginVertical: 24 }} />
       ) : live ? (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Canlı Doluluk (birleşik)</Text>
-          <Text style={styles.row}>Toplam: {live.totalSlots}</Text>
-          <Text style={styles.row}>Boş: {live.availableSlots}</Text>
-          <Text style={styles.row}>Dolu: {live.occupiedSlots}</Text>
-          <Text style={styles.row}>Rezerve: {live.reservedSlots}</Text>
-          <Text style={styles.row}>
-            Doluluk: {(live.occupancyRate * 100).toFixed(0)}%
-          </Text>
+          <Text style={styles.cardTitle}>Canlı Doluluk</Text>
+          <Text style={styles.row}>Toplam: {live.totalSlots} · Boş: {live.availableSlots}</Text>
+          <Text style={styles.row}>Dolu: {live.occupiedSlots} · Rezerve: {live.reservedSlots}</Text>
+          <Text style={styles.row}>Doluluk: {(live.occupancyRate * 100).toFixed(0)}%</Text>
         </View>
       ) : (
         <Text style={styles.hint}>Canlı veri alınamadı</Text>
       )}
 
+      {live?.slots?.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Slot Durumu (Araç / Rezervasyon)</Text>
+          <View style={styles.slotGrid}>
+            {live.slots.map((s) => (
+              <View
+                key={s.slotId}
+                style={[styles.slotChip, { backgroundColor: mergedStatusColor(s.mergedStatus) }]}
+              >
+                <Text style={styles.slotChipNum}>#{s.slotNumber}</Text>
+                <Text style={styles.slotChipStatus}>{slotLabel(s)}</Text>
+                {s.licensePlate ? (
+                  <Text style={styles.slotChipPlate} numberOfLines={1}>🚗 {s.licensePlate}</Text>
+                ) : s.mergedStatus === 'RESERVED' ? (
+                  <Text style={styles.slotChipPlate}>Rezerve</Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Canlı Kamera (loop1.mp4 simülasyonu)</Text>
-        <LiveCameraView height={220} />
         <TouchableOpacity style={styles.btn} onPress={handleLiveScan} disabled={scanning}>
           <Text style={styles.btnText}>{scanning ? 'Taranıyor...' : 'Anlık Kareyi Tara'}</Text>
         </TouchableOpacity>
@@ -108,26 +151,6 @@ const AdminDetailScreen = ({ otopark, onBack }) => {
         />
       </View>
 
-      {live?.slots?.length > 0 && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Slot Durumu</Text>
-          <View style={styles.slotGrid}>
-            {live.slots.map((s) => (
-              <View
-                key={s.slotId}
-                style={[styles.slotChip, { backgroundColor: mergedStatusColor(s.mergedStatus) }]}
-              >
-                <Text style={styles.slotChipNum}>{s.slotNumber}</Text>
-                <Text style={styles.slotChipStatus}>{s.mergedStatus}</Text>
-                {s.licensePlate ? (
-                  <Text style={styles.slotChipPlate} numberOfLines={1}>{s.licensePlate}</Text>
-                ) : null}
-              </View>
-            ))}
-          </View>
-        </View>
-      )}
-
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Aktif Oturumlar ({sessions.length})</Text>
         {sessions.length === 0 ? (
@@ -135,7 +158,7 @@ const AdminDetailScreen = ({ otopark, onBack }) => {
         ) : (
           sessions.map((s) => (
             <Text key={s.sessionId} style={styles.listItem}>
-              {s.licensePlate || '?'} → {s.slotId}
+              🚗 {s.licensePlate || '?'} → Slot #{(s.slotId || '').split('-').pop()} ({s.slotId})
             </Text>
           ))
         )}
@@ -143,20 +166,20 @@ const AdminDetailScreen = ({ otopark, onBack }) => {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Rezervasyonlar ({reservations.length})</Text>
-        {reservations.slice(0, 8).map((r) => (
-          <Text key={r.reservationId} style={styles.listItem}>
-            {r.licensePlate} · {r.slotId} · {formatDateTime(r.startTime)}
-          </Text>
-        ))}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Son Tespitler ({detections.length})</Text>
-        {detections.slice(0, 6).map((d) => (
-          <Text key={d.detectionId} style={styles.listItem}>
-            {d.detectionType} · {d.licensePlate || '-'} · {d.slotId || '-'} · {(d.confidence * 100).toFixed(0)}%
-          </Text>
-        ))}
+        {reservations.length === 0 ? (
+          <Text style={styles.muted}>Rezervasyon yok</Text>
+        ) : (
+          reservations.map((r) => (
+            <View key={r.reservationId} style={styles.resItem}>
+              <Text style={styles.listItem}>
+                Slot #{(r.slotId || '').split('-').pop()} — {r.licensePlate}
+              </Text>
+              <Text style={styles.resSub}>
+                {reservationStatusLabel(r.status)} · {formatDateTime(r.startTime)} → {formatDateTime(r.endTime)}
+              </Text>
+            </View>
+          ))
+        )}
       </View>
     </ScrollView>
   );
@@ -178,27 +201,28 @@ const styles = StyleSheet.create({
   hint: { color: '#999', fontStyle: 'italic', marginBottom: 12 },
   liveImage: { width: '100%', height: 200, backgroundColor: '#EEE', borderRadius: 8 },
   note: { fontSize: 11, color: '#888', marginTop: 8 },
-  btnRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   btn: {
-    flex: 1,
     backgroundColor: '#1A237E',
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',
+    marginBottom: 10,
   },
-  btnAlt: { backgroundColor: '#3949AB' },
   btnText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   slotChip: {
-    width: 72,
-    padding: 8,
+    width: 90,
+    padding: 10,
     borderRadius: 8,
     alignItems: 'center',
+    minHeight: 72,
   },
   slotChipNum: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
-  slotChipStatus: { color: '#FFF', fontSize: 9, marginTop: 2 },
-  slotChipPlate: { color: '#FFF', fontSize: 8, marginTop: 2 },
-  listItem: { fontSize: 13, color: '#444', marginBottom: 6 },
+  slotChipStatus: { color: '#FFF', fontSize: 10, marginTop: 2, textAlign: 'center' },
+  slotChipPlate: { color: '#FFF', fontSize: 9, marginTop: 4, textAlign: 'center' },
+  listItem: { fontSize: 13, color: '#444', marginBottom: 4 },
+  resItem: { marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#EEE' },
+  resSub: { fontSize: 11, color: '#888' },
   muted: { color: '#999', fontStyle: 'italic' },
 });
 

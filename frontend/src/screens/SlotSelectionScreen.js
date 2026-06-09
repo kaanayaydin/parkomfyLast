@@ -124,7 +124,7 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
     return () => { cancelled = true; };
   }, [areaId, startTime, endTime, isValidRange]);
 
-  const slotKey = (slot) => `SLOT-${selectedParking?.id}-${slot.id}`;
+  const resolveSlotId = (slot) => slot.slotId || null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -175,11 +175,11 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
         ) : (
           <View style={styles.grid}>
             {selectedParking?.slots?.map((slot) => {
-              const key = slotKey(slot);
-              const available = availableIds.has(key);
+              const slotId = resolveSlotId(slot);
+              const available = slotId ? availableIds.has(slotId) : false;
               return (
                 <TouchableOpacity
-                  key={slot.id}
+                  key={slotId || slot.id}
                   disabled={!available || !isValidRange}
                   style={[
                     styles.slot,
@@ -210,7 +210,7 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
           onPress={() => onNavigate('Payment', {
             totalFee,
             selectedSlot,
-            slotId: slotKey({ id: selectedSlot }),
+            slotId: selectedParking?.slots?.find((s) => s.id === selectedSlot)?.slotId,
             areaId,
             licensePlate,
             startTime,

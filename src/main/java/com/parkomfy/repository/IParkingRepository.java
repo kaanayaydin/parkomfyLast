@@ -21,6 +21,7 @@ public interface IParkingRepository {
     boolean isAreaCalibrated(String areaId);
     void markAreaCalibrated(String areaId, boolean calibrated);
     void deleteSlotsForArea(String areaId);
+    void resetAllParkingData();
     void insertSlot(String areaId, ParkingSlot slot);
     
     // Parking Slot operations
@@ -60,6 +61,7 @@ public interface IParkingRepository {
     SlotReservation getReservation(String reservationId);
     List<SlotReservation> getReservationsByPlate(String licensePlate);
     List<SlotReservation> getReservationsForArea(String areaId);
+    List<SlotReservation> getAllReservations();
     List<SlotReservation> getOverlappingReservations(String slotId, LocalDateTime start, LocalDateTime end);
     SlotReservation getActiveReservationByPlate(String licensePlate, LocalDateTime at);
     List<SlotReservation> getUpcomingReservations(LocalDateTime from, LocalDateTime to);

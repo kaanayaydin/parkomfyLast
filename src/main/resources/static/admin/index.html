@@ -15,6 +15,7 @@
         <select id="videoSelect" onchange="onVideoChange(this.value)"></select>
       </label>
       <a href="#" onclick="backToList(); return false;">Otoparklar</a>
+      <a href="#" onclick="openReservationsPanel(); return false;">Rezervasyonlar</a>
       <a href="#" onclick="startNewSetup(); return false;">+ Yeni Otopark</a>
     </nav>
   </header>
@@ -27,6 +28,7 @@
       <div id="areaList"></div>
       <div class="row">
         <button class="btn green" onclick="startNewSetup()">+ Yeni Otopark Kaydı</button>
+        <button class="btn red outline" onclick="resetAllParking()">Tüm Otoparkları Sıfırla</button>
       </div>
     </section>
 
@@ -39,7 +41,15 @@
         <div id="setupStep1">
           <input id="areaName" placeholder="Otopark adı *" />
           <input id="areaAddress" placeholder="Adres" style="margin-top:8px" />
-          <input id="lotKey" placeholder="Lot anahtarı (opsiyonel)" style="margin-top:8px" />
+          <label class="video-select-label" style="display:block;margin-top:10px">
+            Kamera videosu *
+            <select id="areaVideo" style="display:block;margin-top:6px;width:100%;max-width:360px">
+              <option value="loop1">1. Otopark — loop1.mp4</option>
+              <option value="loop2">2. Otopark — loop2.mp4</option>
+              <option value="loop3">3. Otopark — loop3.mp4</option>
+            </select>
+          </label>
+          <p class="hint">Her otopark için farklı video seçin (loop1 / loop2 / loop3).</p>
           <div class="row">
             <button class="btn" onclick="createArea()">Otopark Oluştur →</button>
           </div>
@@ -72,6 +82,24 @@
       </div>
     </section>
 
+    <!-- Tüm rezervasyonlar -->
+    <section data-view="reservations" class="hidden">
+      <div class="card">
+        <h2>Tüm Rezervasyonlar</h2>
+        <p class="hint">Tüm otoparklardaki slot rezervasyonları</p>
+        <label class="video-select-label" style="color:#333;display:block;margin-bottom:10px">
+          Otopark filtresi:
+          <select id="reservationAreaFilter" onchange="loadAllReservations()" style="margin-left:8px">
+            <option value="">Tümü</option>
+          </select>
+        </label>
+        <div id="reservationsTableWrap"></div>
+        <div class="row">
+          <button class="btn gray" onclick="backToList()">← Otoparklara Dön</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Canlı detay -->
     <section data-view="detail" class="hidden">
       <div class="card">
@@ -82,6 +110,15 @@
           <canvas id="liveOverlay" class="live-overlay"></canvas>
         </div>
         <div id="slotGrid" class="slot-grid"></div>
+      </div>
+      <div class="card">
+        <h2>Slot Durumu (Araç / Rezervasyon)</h2>
+        <p class="hint">Hangi araç hangi slotta — rezerve slotlar turuncu</p>
+        <div id="slotStatusPanel" class="slot-status-panel"></div>
+      </div>
+      <div class="card">
+        <h2>Bu Otoparktaki Rezervasyonlar</h2>
+        <div id="areaReservationsPanel"></div>
       </div>
       <div class="card">
         <h2>Plaka Tanıma (Giriş Simülasyonu)</h2>

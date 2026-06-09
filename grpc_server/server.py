@@ -1024,21 +1024,33 @@ def _detect_parking_slots(image_bytes, camera_id=""):
     if area_id.startswith("AREA-"):
         calib = slot_model.load_calibration(area_id)
         if calib:
-            quads_norm = slot_model.calibrated_quads_norm(calib)
-            if quads_norm:
-                occ_results = slot_model.check_occupancy_with_model(image_bytes, quads_norm)
+            import hybrid_occupancy
+            hybrid_items = hybrid_occupancy.analyze_calibrated_area(image_bytes, area_id)
+            if hybrid_items:
                 results = []
-                for item in occ_results:
+                quads_norm = []
+                for item in hybrid_items:
                     corners = item["corners"]
-                    x, y, bw, bh = _quad_bbox(corners)
-                    corners_pb = [detection_pb2.Point2D(x=float(c[0]), y=float(c[1])) for c in corners]
+                    quads_norm.append(corners)
+                    corners_pb = [
+                        detection_pb2.Point2D(x=float(c[0]), y=float(c[1])) for c in corners
+                    ]
                     results.append(detection_pb2.ParkingSlotResult(
-                        x=float(x), y=float(y), width=float(bw), height=float(bh),
+                        x=float(item["x"]), y=float(item["y"]),
+                        width=float(item["width"]), height=float(item["height"]),
                         occupied=bool(item["occupied"]),
                         confidence=float(item["confidence"]),
                         corners=corners_pb,
+                        slot_number=int(item["slot_number"]),
+                        vehicle_x=float(item.get("vehicle_x", 0)),
+                        vehicle_y=float(item.get("vehicle_y", 0)),
+                        vehicle_width=float(item.get("vehicle_width", 0)),
+                        vehicle_height=float(item.get("vehicle_height", 0)),
                     ))
-                logger.info("DetectParkingSlots [kalibre %s]: %s slot", area_id, len(results))
+                logger.info(
+                    "DetectParkingSlots [hibrit kalibre %s]: %s slot, %s dolu",
+                    area_id, len(results), sum(1 for r in results if r.occupied),
+                )
                 return results, quads_norm
 
     layout, img_w, img_h = slot_model.predict_slot_layout(image_bytes)
@@ -1282,6 +1294,11 @@ class YOLODetectionServicer(detection_pb2_grpc.YOLODetectionServiceServicer):
         logger.info("DetectParkingSlotsImage isteği alındı")
         image_data = request.image_data if request.image_data else b""
         camera_id = request.camera_id if request.camera_id else ""
+        if camera_id.startswith("AREA-"):
+            import hybrid_occupancy
+            jpeg = hybrid_occupancy.render_annotated_jpeg(image_data, camera_id)
+            if jpeg:
+                return detection_pb2.ParkSlotsImageResponse(image_jpeg=jpeg)
         slots, quads = _detect_parking_slots(image_data, camera_id=camera_id)
         try:
             from PIL import Image

@@ -15,7 +15,7 @@ const LoginScreen = ({ onNavigate, onLogin }) => {
       <View style={styles.form}>
         <TextInput 
           style={styles.input} 
-          placeholder="E-posta" 
+          placeholder="E-posta veya kullanıcı adı" 
           placeholderTextColor="#999"
           value={username}
           onChangeText={setUsername}

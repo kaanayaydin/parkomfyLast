@@ -4,18 +4,22 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
-import HomeScreen, { PARKING_LOTS } from './src/screens/HomeScreen';
+import HomeScreen from './src/screens/HomeScreen';
 import SlotSelectionScreen from './src/screens/SlotSelectionScreen';
 import PaymentSummaryScreen from './src/screens/PaymentSummaryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ReservationsScreen from './src/screens/ReservationsScreen';
 import EntranceScreen from './src/screens/EntranceScreen';
+import AdminScreen from './src/screens/AdminScreen';
+import AdminDetailScreen from './src/screens/AdminDetailScreen';
+import AdminReservationsScreen from './src/screens/AdminReservationsScreen';
 import {
   getLiveParkingStatus,
   getPublicParkingAreas,
   createReservation,
   getReservations,
+  cancelReservation,
   buildDateTime,
   registerUser,
   loginUser,
@@ -24,12 +28,22 @@ import {
 } from './src/config/api';
 import { setupPushNotifications } from './src/config/notifications';
 
-const TAB_ITEMS = [
+const DRIVER_TABS = [
   { id: 'Home', label: 'Otopark' },
   { id: 'Reservations', label: 'Rezervasyon' },
   { id: 'Profile', label: 'Profil' },
   { id: 'Settings', label: 'Ayarlar' },
 ];
+
+const ADMIN_TABS = [
+  { id: 'AdminHome', label: 'Otoparklar' },
+  { id: 'AdminReservations', label: 'Rezervasyonlar' },
+  { id: 'Settings', label: 'Ayarlar' },
+];
+
+function isAdminUser(user) {
+  return user?.email === 'admin' || user?.role === 'ADMIN';
+}
 
 const styles = StyleSheet.create({
   tabBar: {
@@ -60,16 +74,45 @@ export default function App() {
   const [selectedParkingId, setSelectedParkingId] = useState(null);
   const [paymentData, setPaymentData] = useState(null);
   const [reservations, setReservations] = useState([]);
+  const [adminOtopark, setAdminOtopark] = useState(null);
 
   const [currentUser, setCurrentUser] = useState(null);
 
-  const visibleTabs = TAB_ITEMS;
+  const adminMode = isAdminUser(currentUser);
+  const visibleTabs = adminMode ? ADMIN_TABS : DRIVER_TABS;
+
+  const mapReservation = (r) => ({
+    ...r,
+    parkingName: r.areaId,
+    selectedSlot: r.slotId?.split('-').pop(),
+    durationHours: Math.ceil(
+      (new Date(r.endTime) - new Date(r.startTime)) / (1000 * 60 * 60)
+    ),
+  });
+
+  const loadReservations = async (plate) => {
+    if (!plate) {
+      setReservations([]);
+      return;
+    }
+    try {
+      const res = await getReservations(plate);
+      if (res.success && res.data?.length) {
+        setReservations(res.data.map(mapReservation));
+      } else {
+        setReservations([]);
+      }
+    } catch {
+      setReservations([]);
+    }
+  };
 
   const mapAreasToLots = (areas) => (areas || []).map((a) => ({
     id: a.areaId,
     areaId: a.areaId,
     name: a.areaName,
     location: a.address || '',
+    lotKey: a.lotKey || 'loop1',
     price: 20,
     slots: Array.from({ length: a.slotCount || 0 }, (_, i) => ({ id: i + 1, status: 'available' })),
   }));
@@ -80,10 +123,10 @@ export default function App() {
       if (res.success && res.data?.length) {
         setParkingData(mapAreasToLots(res.data));
       } else {
-        setParkingData(PARKING_LOTS.map((p) => ({ ...p, areaId: p.id })));
+        setParkingData([]);
       }
     } catch {
-      setParkingData(PARKING_LOTS.map((p) => ({ ...p, areaId: p.id })));
+      setParkingData([]);
     }
   };
 
@@ -93,10 +136,12 @@ export default function App() {
       if (res.success) {
         const user = mapUserFromApi(res.data);
         setCurrentUser(user);
-        setActiveTab('Home');
+        setActiveTab(isAdminUser(user) ? 'AdminHome' : 'Home');
         setCurrentScreen('MainApp');
-        loadPublicAreas();
-        setupPushNotifications(user.userId);
+        if (!isAdminUser(user)) {
+          loadPublicAreas();
+          setupPushNotifications(user.userId);
+        }
       } else {
         Alert.alert('Giriş başarısız', res.message || 'E-posta veya şifre hatalı');
       }
@@ -130,57 +175,46 @@ export default function App() {
 
   useEffect(() => {
     if (currentScreen === 'Login' || currentScreen === 'Register') return;
+    if (adminMode) return;
     loadPublicAreas();
-  }, [currentScreen]);
+  }, [currentScreen, adminMode]);
 
   useEffect(() => {
     if (currentScreen === 'Login' || currentScreen === 'Register') return;
-    if (!currentUser?.plate) return;
-    getReservations(currentUser.plate).then((res) => {
-      if (res.success && res.data?.length) {
-        setReservations(
-          res.data.map((r) => ({
-            ...r,
-            parkingName: r.areaId,
-            selectedSlot: r.slotId?.split('-').pop(),
-            durationHours: Math.ceil(
-              (new Date(r.endTime) - new Date(r.startTime)) / (1000 * 60 * 60)
-            ),
-          }))
-        );
-      }
-    }).catch(() => {});
-  }, [currentScreen, currentUser?.plate]);
+    if (adminMode) return;
+    loadReservations(currentUser?.plate);
+  }, [currentScreen, currentUser?.plate, adminMode]);
 
   useEffect(() => {
     if (currentScreen === 'Login' || currentScreen === 'Register') return;
+    if (adminMode) return;
+
+    const mapLiveSlot = (liveSlot) => {
+      let status = 'available';
+      if (liveSlot.mergedStatus === 'OCCUPIED') status = 'occupied';
+      else if (liveSlot.mergedStatus === 'RESERVED') status = 'reserved';
+      const showPlate = liveSlot.mergedStatus === 'OCCUPIED' || liveSlot.mergedStatus === 'RESERVED';
+      return {
+        id: liveSlot.slotNumber,
+        slotId: liveSlot.slotId,
+        status,
+        displayLabel: liveSlot.displayLabel,
+        licensePlate: showPlate ? liveSlot.licensePlate : null,
+        availableForBooking: !!liveSlot.availableForBooking,
+      };
+    };
 
     const applyLiveData = (lotId, live) => {
       if (!live) return;
       setParkingData((prev) =>
         prev.map((park) => {
           if (park.id !== lotId) return park;
-          const slotMap = {};
-          (live.slots || []).forEach((s) => {
-            const num = s.slotNumber || parseInt(s.slotId?.split('-').pop(), 10);
-            if (num) slotMap[num] = s;
-          });
+          const liveSlots = (live.slots || []).map(mapLiveSlot);
           return {
             ...park,
             occupiedCount: live.occupiedSlots ?? 0,
-            slots: park.slots.map((s) => {
-              const liveSlot = slotMap[s.id];
-              if (!liveSlot) return s;
-              let status = 'available';
-              if (liveSlot.mergedStatus === 'OCCUPIED') status = 'occupied';
-              else if (liveSlot.mergedStatus === 'RESERVED') status = 'reserved';
-              return {
-                ...s,
-                status,
-                displayLabel: liveSlot.displayLabel,
-                licensePlate: liveSlot.licensePlate,
-              };
-            }),
+            availableCount: live.availableSlots ?? 0,
+            slots: liveSlots.length ? liveSlots : park.slots,
           };
         })
       );
@@ -191,9 +225,9 @@ export default function App() {
         const hour = new Date().getHours();
         const startTime = buildDateTime(0, hour);
         const endTime = buildDateTime(0, Math.min(22, hour + 2));
-        const lots = parkingData.length ? parkingData : PARKING_LOTS.map((p) => ({ ...p, areaId: p.id }));
+        if (!parkingData.length) return;
         const updates = await Promise.all(
-          lots.map(async (lot) => {
+          parkingData.map(async (lot) => {
             const areaId = lot.areaId || lot.id;
             const liveRes = await getLiveParkingStatus(areaId, startTime, endTime);
             return { lotId: lot.id, live: liveRes.success ? liveRes.data : null };
@@ -209,7 +243,7 @@ export default function App() {
     const syncInterval = setInterval(syncLive, 5000);
     const disconnectWs = connectParkingWebSocket((payload) => {
       if (payload.type === 'LIVE_STATUS' && payload.data?.areaId) {
-        const lot = (parkingData.length ? parkingData : PARKING_LOTS).find(
+        const lot = parkingData.find(
           (p) => (p.areaId || p.id) === payload.data.areaId
         );
         if (lot) applyLiveData(lot.id, payload.data);
@@ -220,7 +254,7 @@ export default function App() {
       clearInterval(syncInterval);
       disconnectWs();
     };
-  }, [currentScreen, parkingData]);
+  }, [currentScreen, parkingData, adminMode]);
 
   const handleNavigate = (screen, data = null) => {
     if (screen === 'Slots') setSelectedParkingId(data.id);
@@ -241,13 +275,7 @@ export default function App() {
         Alert.alert('Hata', res.message || 'Rezervasyon oluşturulamadı');
         return;
       }
-      const booking = {
-        ...paymentData,
-        ...res.data,
-        totalFee: res.data.totalFee,
-        date: new Date().toLocaleDateString(),
-      };
-      setReservations([booking, ...reservations]);
+      await loadReservations(currentUser?.plate);
       Alert.alert('Başarılı', 'Slot seçilen saat aralığı için rezerve edildi!');
       setCurrentScreen('MainApp');
       setActiveTab('Reservations');
@@ -256,7 +284,61 @@ export default function App() {
     }
   };
 
+  const handleCancelReservation = async (reservationId) => {
+    try {
+      const res = await cancelReservation(reservationId, currentUser?.plate);
+      if (!res.success) {
+        Alert.alert('İptal başarısız', res.message || 'Rezervasyon iptal edilemedi');
+        return;
+      }
+      await loadReservations(currentUser?.plate);
+      Alert.alert('İptal edildi', 'Rezervasyonunuz iptal edildi.');
+    } catch {
+      Alert.alert('Hata', 'Sunucuya bağlanılamadı. Spring Boot çalışıyor mu?');
+    }
+  };
+
   const renderContent = () => {
+    if (adminMode) {
+      if (currentScreen === 'AdminDetail' && adminOtopark) {
+        return (
+          <AdminDetailScreen
+            otopark={adminOtopark}
+            onBack={() => setCurrentScreen('MainApp')}
+          />
+        );
+      }
+      if (activeTab === 'AdminHome') {
+        return (
+          <AdminScreen
+            onEnterDetail={(otopark) => {
+              setAdminOtopark(otopark);
+              setCurrentScreen('AdminDetail');
+            }}
+            onNewParking={() => Alert.alert(
+              'Kalibrasyon',
+              'Yeni otopark kalibrasyonu bilgisayardan http://sunucu:8080/admin adresinden yapılır.'
+            )}
+          />
+        );
+      }
+      if (activeTab === 'AdminReservations') {
+        return <AdminReservationsScreen />;
+      }
+      if (activeTab === 'Settings') {
+        return <SettingsScreen onLogout={() => { setCurrentUser(null); setCurrentScreen('Login'); }} />;
+      }
+      return (
+        <AdminScreen
+          onEnterDetail={(otopark) => {
+            setAdminOtopark(otopark);
+            setCurrentScreen('AdminDetail');
+          }}
+          onNewParking={() => Alert.alert('Kalibrasyon', 'Web admin panelini kullanın: :8080/admin')}
+        />
+      );
+    }
+
     if (currentScreen === 'Entrance') {
       return <EntranceScreen onBack={() => setCurrentScreen('MainApp')} />;
     }
@@ -271,7 +353,12 @@ export default function App() {
     if (activeTab === 'Settings')
       return <SettingsScreen onLogout={() => { setCurrentUser(null); setCurrentScreen('Login'); }} />;
     if (activeTab === 'Reservations')
-      return <ReservationsScreen reservations={reservations} />;
+      return (
+        <ReservationsScreen
+          reservations={reservations}
+          onCancel={handleCancelReservation}
+        />
+      );
     if (currentScreen === 'Slots')
       return (
         <SlotSelectionScreen
@@ -307,6 +394,7 @@ export default function App() {
         ) : (
           <View style={{ flex: 1 }}>
             <View style={{ flex: 1 }}>{renderContent()}</View>
+            {!(adminMode && currentScreen === 'AdminDetail') && (
             <View style={styles.tabBar}>
               {visibleTabs.map((tab) => (
                 <TouchableOpacity
@@ -316,7 +404,7 @@ export default function App() {
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   onPress={() => {
                     setActiveTab(tab.id);
-                    if (tab.id === 'Home') setCurrentScreen('MainApp');
+                    setCurrentScreen('MainApp');
                   }}
                 >
                   <Text
@@ -331,6 +419,7 @@ export default function App() {
                 </TouchableOpacity>
               ))}
             </View>
+            )}
           </View>
         )}
       </SafeAreaView>

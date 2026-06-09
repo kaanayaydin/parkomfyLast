@@ -1,5 +1,9 @@
 const API = `${window.location.origin}/api/v1`;
 const SNAPSHOT_URL = `${API}/camera/live/snapshot`;
+function snapshotUrlForLot(lotKey) {
+  const lot = (lotKey || 'loop1').replace('.mp4', '');
+  return `${SNAPSHOT_URL}?lot=${encodeURIComponent(lot)}`;
+}
 let snapshotTimer = null;
 
 const state = {
@@ -37,15 +41,27 @@ function showView(name) {
   document.querySelectorAll('[data-view]').forEach((el) => {
     el.classList.toggle('hidden', el.dataset.view !== name);
   });
-  if (name === 'setup' && state.step === 2) startLiveVideo('setupLiveStream');
-  if (name === 'detail') startLiveVideo('liveStream');
+  if (name === 'setup' && state.step === 2) startLiveVideo('setupLiveStream', state.setup.lotKey);
+  if (name === 'detail') startLiveVideo('liveStream', state.selectedArea?.lotKey);
 }
 
-function startLiveVideo(elementId) {
+function videoDisplayRect(wrapW, wrapH, imgW, imgH) {
+  if (!imgW || !imgH) return { x: 0, y: 0, w: wrapW, h: wrapH };
+  const scale = Math.min(wrapW / imgW, wrapH / imgH);
+  const dw = imgW * scale;
+  const dh = imgH * scale;
+  return { x: (wrapW - dw) / 2, y: (wrapH - dh) / 2, w: dw, h: dh };
+}
+
+function startLiveVideo(elementId, lotKey) {
   const el = document.getElementById(elementId);
   if (!el) return;
+  const urlBase = lotKey ? snapshotUrlForLot(lotKey) : SNAPSHOT_URL;
   const tick = () => {
-    el.src = `${SNAPSHOT_URL}?t=${Date.now()}`;
+    el.onload = () => {
+      if (state.view === 'detail' && liveSlotsCache.length) drawLiveOverlay(liveSlotsCache);
+    };
+    el.src = `${urlBase}&t=${Date.now()}`;
   };
   tick();
   if (snapshotTimer) clearInterval(snapshotTimer);
@@ -84,14 +100,34 @@ async function onVideoChange(videoId) {
   const res = await fetch(`${API}/camera/live/video?video=${encodeURIComponent(videoId)}`, { method: 'POST' });
   const data = await res.json();
   if (data.success) {
-    state.currentVideo = videoId;
+    state.currentVideo = videoId.replace('.mp4', '');
     toast(`Kamera: ${data.current || videoId}`);
     startLiveVideo('liveStream');
     startLiveVideo('setupLiveStream');
+    const sel = document.getElementById('videoSelect');
+    if (sel) sel.value = state.currentVideo;
   } else {
     toast(data.message || 'Video değiştirilemedi');
     loadVideoOptions();
   }
+}
+
+function videoLabel(lotKey) {
+  const v = (lotKey || '').replace('.mp4', '');
+  if (v === 'loop1') return 'loop1.mp4';
+  if (v === 'loop2') return 'loop2.mp4';
+  if (v === 'loop3') return 'loop3.mp4';
+  return lotKey || '—';
+}
+
+function currentLotKey() {
+  if (state.view === 'detail' && state.selectedArea?.lotKey) {
+    return state.selectedArea.lotKey.replace('.mp4', '');
+  }
+  if (state.view === 'setup' && state.setup.lotKey) {
+    return state.setup.lotKey.replace('.mp4', '');
+  }
+  return state.currentVideo || 'loop1';
 }
 
 // ─── Liste ───
@@ -99,15 +135,16 @@ async function loadAreas() {
   const res = await api('/admin/parking-areas');
   state.areas = res.success ? res.data : [];
   const list = document.getElementById('areaList');
+  updateAreaVideoOptions();
   if (!state.areas.length) {
-    list.innerHTML = '<p class="hint">Henüz otopark yok. Yeni kayıt oluşturun.</p>';
+    list.innerHTML = '<p class="hint">Henüz otopark yok. 3 otopark için sırayla loop1, loop2, loop3 videolarıyla kayıt oluşturun.</p>';
     return;
   }
   list.innerHTML = state.areas.map((a) => `
     <div class="area-item">
       <div>
         <strong>${a.areaName}</strong> <span class="badge ${a.calibrated ? 'ok' : 'warn'}">${a.calibrated ? 'Kalibre' : 'Kalibre değil'}</span>
-        <div class="hint">${a.areaId} · ${a.slotCount} slot · ${a.address || ''}</div>
+        <div class="hint">${a.areaId} · ${a.slotCount} slot · ${videoLabel(a.lotKey)} · ${a.address || ''}</div>
       </div>
       <div class="row">
         ${!a.calibrated ? `<button class="btn blue" onclick="startSetupFor('${a.areaId}')">Kalibre Et</button>` : ''}
@@ -130,7 +167,25 @@ function startNewSetup() {
   state.setup = { areaId: null, lotKey: '', imageBase64: null, imageWidth: 1280, imageHeight: 720, slots: [], selectedSlot: 0 };
   state.step = 1;
   showView('setup');
+  updateAreaVideoOptions();
   renderSetup();
+}
+
+function updateAreaVideoOptions() {
+  const sel = document.getElementById('areaVideo');
+  if (!sel) return;
+  const used = new Set(state.areas.map((a) => (a.lotKey || '').replace('.mp4', '')));
+  [...sel.options].forEach((opt) => {
+    const taken = used.has(opt.value);
+    opt.disabled = taken;
+    opt.textContent = opt.value === 'loop1'
+      ? `1. Otopark — loop1.mp4${taken ? ' (kullanımda)' : ''}`
+      : opt.value === 'loop2'
+        ? `2. Otopark — loop2.mp4${taken ? ' (kullanımda)' : ''}`
+        : `3. Otopark — loop3.mp4${taken ? ' (kullanımda)' : ''}`;
+  });
+  const firstFree = [...sel.options].find((o) => !o.disabled);
+  if (firstFree) sel.value = firstFree.value;
 }
 
 // ─── Kurulum ───
@@ -139,7 +194,7 @@ function renderSetup() {
   document.getElementById('setupStep2').classList.toggle('hidden', state.step !== 2);
   document.getElementById('setupStep3').classList.toggle('hidden', state.step !== 3);
   document.getElementById('setupStepLabel').textContent = `Adım ${state.step}/3`;
-  if (state.step === 2) startLiveVideo('setupLiveStream');
+  if (state.step === 2) startLiveVideo('setupLiveStream', state.setup.lotKey);
   if (state.step === 3) drawCalibration();
   renderSlotChips();
 }
@@ -147,12 +202,13 @@ function renderSetup() {
 async function createArea() {
   const name = document.getElementById('areaName').value.trim();
   const address = document.getElementById('areaAddress').value.trim();
-  const lotKey = document.getElementById('lotKey').value.trim();
+  const lotKey = document.getElementById('areaVideo').value;
   if (!name) { toast('Otopark adı gerekli'); return; }
+  if (!lotKey) { toast('Kamera videosu seçin'); return; }
   const res = await api('/admin/parking-areas', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ areaName: name, address, lotKey: lotKey || undefined }),
+    body: JSON.stringify({ areaName: name, address, lotKey }),
   });
   if (!res.success) { toast(res.message || 'Hata'); return; }
   state.setup.areaId = res.data.areaId;
@@ -160,12 +216,22 @@ async function createArea() {
   state.step = 2;
   toast('Otopark oluşturuldu');
   renderSetup();
-  startLiveVideo('setupLiveStream');
+  startLiveVideo('setupLiveStream', res.data.lotKey);
+}
+
+async function resetAllParking() {
+  if (!window.confirm('Tüm otoparklar, slotlar ve rezervasyonlar silinecek. Kullanıcılar korunur. Emin misiniz?')) {
+    return;
+  }
+  const res = await api('/admin/parking-areas/reset', { method: 'POST' });
+  toast(res.success ? (res.message || 'Sıfırlandı') : (res.message || 'Hata'));
+  if (res.success) loadAreas();
 }
 
 async function predictFromLive() {
   toast('Model işliyor…');
-  const res = await api('/camera/live/predict-slots', { method: 'POST' });
+  const lot = (state.setup.lotKey || 'loop1').replace('.mp4', '');
+  const res = await api(`/camera/live/predict-slots?lot=${encodeURIComponent(lot)}`, { method: 'POST' });
   if (!res.success) { toast(res.message || 'Tahmin başarısız'); return; }
   applyPrediction(res.data);
   state.step = 3;
@@ -379,6 +445,7 @@ function slotOverlayColor(merged) {
 function drawLiveOverlay(slots) {
   const wrap = document.getElementById('liveVideoWrap');
   const canvas = document.getElementById('liveOverlay');
+  const img = document.getElementById('liveStream');
   if (!wrap || !canvas || !wrap.clientWidth) return;
 
   const w = wrap.clientWidth;
@@ -389,12 +456,17 @@ function drawLiveOverlay(slots) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
 
+  const vr = videoDisplayRect(w, h, img?.naturalWidth, img?.naturalHeight);
+
   (slots || []).forEach((slot) => {
     const corners = slot.corners;
     if (!corners || corners.length < 4) return;
 
     const { stroke, fill } = slotOverlayColor(slot.mergedStatus);
-    const pts = corners.map((c) => ({ x: (c.x || 0) * w, y: (c.y || 0) * h }));
+    const pts = corners.map((c) => ({
+      x: vr.x + (c.x || 0) * vr.w,
+      y: vr.y + (c.y || 0) * vr.h,
+    }));
 
     ctx.beginPath();
     pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
@@ -409,10 +481,8 @@ function drawLiveOverlay(slots) {
     const cy = pts.reduce((s, p) => s + p.y, 0) / 4;
     const label = slot.displayLabel || (slot.mergedStatus === 'AVAILABLE' ? 'BOŞ' : slot.mergedStatus);
     const lines = [`#${slot.slotNumber}`, label];
-    if (slot.licensePlate) {
+    if (slot.licensePlate && (slot.mergedStatus === 'OCCUPIED' || slot.mergedStatus === 'RESERVED')) {
       lines.push(`🚗 ${slot.licensePlate}`);
-    } else if (slot.mergedStatus === 'AVAILABLE') {
-      lines.push('Plaka yok');
     }
 
     ctx.font = 'bold 13px Segoe UI, sans-serif';
@@ -445,10 +515,10 @@ async function openDetail(areaId) {
   state.selectedArea = state.areas.find((a) => a.areaId === areaId) || { areaId, areaName: areaId };
   showView('detail');
   document.getElementById('detailTitle').textContent = state.selectedArea.areaName || areaId;
-  startLiveVideo('liveStream');
+  startLiveVideo('liveStream', state.selectedArea.lotKey);
   await refreshDetail();
   if (detailTimer) clearInterval(detailTimer);
-  detailTimer = setInterval(refreshDetail, 5000);
+  detailTimer = setInterval(refreshDetail, 2000);
 }
 
 async function refreshPlates(areaId) {
@@ -472,26 +542,44 @@ async function refreshPlates(areaId) {
 async function refreshDetail() {
   const areaId = state.selectedArea?.areaId;
   if (!areaId) return;
-  const [res, sessRes] = await Promise.all([
-    api(`/parking/live?areaId=${encodeURIComponent(areaId)}`),
+  const [res, sessRes, resvRes] = await Promise.all([
+    api(`/admin/live-hybrid?areaId=${encodeURIComponent(areaId)}`),
     api(`/admin/sessions?areaId=${encodeURIComponent(areaId)}`),
+    api(`/admin/reservations?areaId=${encodeURIComponent(areaId)}`),
   ]);
   if (!res.success) return;
   const live = res.data;
   const sessions = sessRes.success ? (sessRes.data || []) : [];
+  const reservations = resvRes.success ? (resvRes.data || []) : [];
   const plateBySlot = {};
   sessions.forEach((s) => {
     if (s.slotId && s.licensePlate) plateBySlot[s.slotId] = s.licensePlate;
   });
+  const reservationPlateBySlot = {};
+  reservations.forEach((r) => {
+    if (r.slotId && r.licensePlate
+      && (r.status === 'RESERVED' || r.status === 'ACTIVE')) {
+      reservationPlateBySlot[r.slotId] = r.licensePlate;
+    }
+  });
   document.getElementById('detailMeta').textContent =
-    `Toplam ${live.totalSlots} · Boş ${live.availableSlots} · Dolu ${live.occupiedSlots} · Rezerve ${live.reservedSlots} · ${live.lastUpdated || ''}`;
+    `Toplam ${live.totalSlots} · Boş ${live.availableSlots} · Dolu ${live.occupiedSlots} · Rezerve ${live.reservedSlots} · Hibrit (canlı) · ${live.lastUpdated || ''}`;
 
-  liveSlotsCache = (live.slots || []).map((s) => ({
-    ...s,
-    licensePlate: s.licensePlate || plateBySlot[s.slotId] || null,
-  }));
+  liveSlotsCache = (live.slots || []).map((s) => {
+    const showPlate = s.mergedStatus === 'OCCUPIED' || s.mergedStatus === 'RESERVED';
+    let plate = null;
+    if (showPlate) {
+      plate = s.licensePlate
+        || (s.mergedStatus === 'RESERVED' ? reservationPlateBySlot[s.slotId] : null)
+        || plateBySlot[s.slotId]
+        || null;
+    }
+    return { ...s, licensePlate: plate };
+  });
   drawLiveOverlay(liveSlotsCache);
   await refreshPlates(areaId);
+  renderSlotStatusPanel(liveSlotsCache);
+  renderAreaReservations(reservations);
 
   const grid = document.getElementById('slotGrid');
   grid.innerHTML = liveSlotsCache.map((s) => {
@@ -499,7 +587,8 @@ async function refreshDetail() {
     if (s.mergedStatus === 'OCCUPIED') cls = 'occ';
     else if (s.mergedStatus === 'RESERVED') cls = 'res';
     const label = s.displayLabel || (s.mergedStatus === 'AVAILABLE' ? 'BOŞ' : s.mergedStatus);
-    const plate = s.licensePlate ? `<div class="hint">${s.licensePlate}</div>` : '';
+    const plate = (s.mergedStatus === 'OCCUPIED' || s.mergedStatus === 'RESERVED') && s.licensePlate
+      ? `<div class="hint">🚗 ${s.licensePlate}</div>` : '';
     const slotId = s.slotId ? `<div class="hint">${s.slotId}</div>` : '';
     return `<div class="slot-card ${cls}">#${s.slotNumber}<br>${label}${plate}${slotId}</div>`;
   }).join('');
@@ -517,6 +606,131 @@ async function assignManualPlate() {
   });
   toast(res.success ? 'Plaka atandı' : (res.message || 'Hata'));
   if (res.success) refreshDetail();
+}
+
+function reservationStatusPill(status) {
+  const s = (status || '').toLowerCase();
+  const labels = {
+    reserved: 'Rezerve',
+    active: 'Aktif',
+    completed: 'Tamamlandı',
+    cancelled: 'İptal',
+  };
+  return `<span class="status-pill ${s}">${labels[s] || status || '-'}</span>`;
+}
+
+function formatResTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso.length === 19 ? iso : iso.substring(0, 19));
+  return d.toLocaleString('tr-TR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function areaNameById(areaId) {
+  const a = state.areas.find((x) => x.areaId === areaId);
+  return a?.areaName || areaId || '-';
+}
+
+async function openReservationsPanel() {
+  if (detailTimer) { clearInterval(detailTimer); detailTimer = null; }
+  stopLiveVideo();
+  if (!state.areas.length) await loadAreas();
+  showView('reservations');
+  const sel = document.getElementById('reservationAreaFilter');
+  if (sel && sel.options.length <= 1) {
+    sel.innerHTML = '<option value="">Tümü</option>' + state.areas.map((a) =>
+      `<option value="${a.areaId}">${a.areaName || a.areaId}</option>`
+    ).join('');
+  }
+  await loadAllReservations();
+}
+
+async function loadAllReservations() {
+  const wrap = document.getElementById('reservationsTableWrap');
+  if (!wrap) return;
+  const filter = document.getElementById('reservationAreaFilter')?.value || '';
+  const path = filter
+    ? `/admin/reservations?areaId=${encodeURIComponent(filter)}`
+    : '/admin/reservations';
+  const res = await api(path);
+  if (!res.success) {
+    wrap.innerHTML = '<p class="hint">Rezervasyonlar yüklenemedi.</p>';
+    return;
+  }
+  const rows = res.data || [];
+  if (!rows.length) {
+    wrap.innerHTML = '<p class="hint">Henüz rezervasyon yok.</p>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table class="res-table">
+      <thead>
+        <tr>
+          <th>Otopark</th><th>Slot</th><th>Plaka</th><th>Başlangıç</th><th>Bitiş</th><th>Durum</th><th>Ücret</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r) => `
+          <tr>
+            <td>${areaNameById(r.areaId)}</td>
+            <td>#${(r.slotId || '').split('-').pop() || r.slotId}<br><span class="hint">${r.slotId || ''}</span></td>
+            <td><strong>${r.licensePlate || '-'}</strong></td>
+            <td>${formatResTime(r.startTime)}</td>
+            <td>${formatResTime(r.endTime)}</td>
+            <td>${reservationStatusPill(r.status)}</td>
+            <td>${r.totalFee != null ? r.totalFee + ' TL' : '-'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderSlotStatusPanel(slots) {
+  const el = document.getElementById('slotStatusPanel');
+  if (!el) return;
+  if (!slots.length) {
+    el.innerHTML = '<p class="hint">Slot verisi yok.</p>';
+    return;
+  }
+  el.innerHTML = slots.map((s) => {
+    let cls = 'free';
+    if (s.mergedStatus === 'OCCUPIED') cls = 'occ';
+    else if (s.mergedStatus === 'RESERVED') cls = 'res';
+    const label = s.displayLabel || (s.mergedStatus === 'AVAILABLE' ? 'BOŞ' : s.mergedStatus);
+    let detail = 'Slot boş';
+    if (s.mergedStatus === 'OCCUPIED') {
+      detail = s.licensePlate ? `Araç: ${s.licensePlate}` : 'Araç var (plaka bekleniyor)';
+    } else if (s.mergedStatus === 'RESERVED') {
+      detail = s.licensePlate ? `Rezerve — ${s.licensePlate}` : 'Rezerve (plaka yok)';
+    }
+    return `
+      <div class="slot-status-item ${cls}">
+        <strong>Slot #${s.slotNumber}</strong>
+        <div class="sub">${label}</div>
+        <div class="sub">${detail}</div>
+        <div class="sub">${s.slotId || ''}</div>
+      </div>`;
+  }).join('');
+}
+
+function renderAreaReservations(reservations) {
+  const el = document.getElementById('areaReservationsPanel');
+  if (!el) return;
+  const active = (reservations || []).filter((r) =>
+    r.status === 'RESERVED' || r.status === 'ACTIVE'
+  );
+  if (!active.length) {
+    el.innerHTML = '<p class="hint">Bu otoparkta aktif rezervasyon yok.</p>';
+    return;
+  }
+  el.innerHTML = active.map((r) => `
+    <div class="plate-chip">
+      Slot #${(r.slotId || '').split('-').pop() || '?'} — ${r.licensePlate}
+      <div class="sub">${formatResTime(r.startTime)} → ${formatResTime(r.endTime)} · ${reservationStatusPill(r.status)}</div>
+    </div>
+  `).join('');
 }
 
 function backToList() {

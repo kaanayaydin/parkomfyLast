@@ -82,6 +82,28 @@ export async function getReservations(licensePlate) {
   return res.json();
 }
 
+export async function cancelReservation(reservationId, licensePlate) {
+  const res = await fetch(
+    `${API_BASE}/parking/reservations/${encodeURIComponent(reservationId)}/cancel?licensePlate=${encodeURIComponent(licensePlate)}`,
+    { method: 'POST' }
+  );
+  return res.json();
+}
+
+export function reservationStatusLabel(status) {
+  switch (status) {
+    case 'RESERVED': return 'Aktif';
+    case 'ACTIVE': return 'Devam ediyor';
+    case 'COMPLETED': return 'Tamamlandı';
+    case 'CANCELLED': return 'İptal edildi';
+    default: return status || '-';
+  }
+}
+
+export function canCancelReservation(item) {
+  return item?.status === 'RESERVED' && item?.reservationId;
+}
+
 /** YYYY-MM-DDTHH:mm:00 for backend from a full Date */
 export function buildDateTimeFromDate(d) {
   const date = new Date(d);
@@ -238,7 +260,9 @@ export async function registerPushToken(userId, expoPushToken) {
 }
 
 export async function getAdminReservations(areaId) {
-  const res = await fetch(`${API_BASE}/admin/reservations?areaId=${encodeURIComponent(areaId)}`);
+  let url = `${API_BASE}/admin/reservations`;
+  if (areaId) url += `?areaId=${encodeURIComponent(areaId)}`;
+  const res = await fetch(url);
   return res.json();
 }
 
@@ -293,8 +317,9 @@ export async function createParkingArea({ areaName, address, lotKey }) {
   return res.json();
 }
 
-export function getLiveCameraSnapshotUrl(cacheBust = Date.now()) {
-  return `${API_BASE}/camera/live/snapshot?t=${cacheBust}`;
+export function getLiveCameraSnapshotUrl(lotKey = 'loop1', cacheBust = Date.now()) {
+  const lot = String(lotKey || 'loop1').replace('.mp4', '');
+  return `${API_BASE}/camera/live/snapshot?lot=${encodeURIComponent(lot)}&t=${cacheBust}`;
 }
 
 export async function getLiveCameraStatus() {

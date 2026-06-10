@@ -552,3 +552,19 @@ SON DURUM OZETI (guncel)
  - react-native-webview kaldirildi (npm uninstall).
  - Karar: dusuk fps snapshot yontemi korunuyor, kamera akiciligi gelistirilmeyecek.
 ================================================================================
+
+== Eren develop-eren merge (local) + slot OCR iyilestirmesi ==
+ - origin/develop-eren kaan-dev icine fast-forward merge edildi (walk-in billing,
+   reservation timeline, slot chart, camera sync, yeni DTO/service'ler). mvn compile+test OK.
+ - Slot kamerasi OCR yanlis okuma sorunu (fallback kaldirildiktan sonra):
+   olcum (loop1, 20 kare): slot2 komsu aracin plakasini okuyordu (67ACP81), slot3 tek
+   yanlis (57ACP810) kilitlenebiliyordu.
+ - Cozum (3 iyilestirme):
+   A) Coklu-kare oylama: ayni plaka MIN_PLATE_VOTES=3 kez okunmadan slota yazilmaz.
+   B) Poligon maskeleme: FrameCropUtil.cropPolygonMaskedJpeg slot dortgenine maskeler
+      (1.3x genisletme + 0.05 yukari kaydirma); komsu aracin plakasi kirpima girmez.
+   C) Ayni-plaka tekilligi: bir plaka baska dolu slota atanmissa ikinciye atanmaz.
+ - Sonuc (uctan uca simulasyon): slot3=67ACP810 kesin dogru, slot1/slot2 plaka
+   okunamadi (DOLU, durust) - SIFIR yanlis okuma. slot1 acili/uzak plaka fiziksel limit.
+ - Henuz remote'a pushlanmadi (kullanici istegiyle local).
+================================================================================

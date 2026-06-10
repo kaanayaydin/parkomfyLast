@@ -26,6 +26,11 @@ public class OccupancySyncService {
 
     private static final double MIN_OCC_CONF = 0.25;
     private static final double MIN_PLATE_CONF = 0.55;
+    // Coklu-kare oylama: ayni plakayi bu kadar kez okumadan slota yazma
+    // (tek-kare yanlis okumalari eler). Slot polygon maskeleme + bu = sağlam.
+    private static final int MIN_PLATE_VOTES = 3;
+    // slotId -> (normalize plaka -> [oy sayisi, guven toplami])
+    private final Map<String, Map<String, double[]>> slotPlateVotes = new ConcurrentHashMap<>();
     private final IParkingRepository repository;
     private final IYOLOInference yoloInference;
     private final CameraSimulationService cameraSimulationService;
@@ -258,6 +263,8 @@ public class OccupancySyncService {
                     dbSlot.vacate();
                     repository.updateSlot(dbSlot);
                 }
+                // Slot bosaldi: birikmis plaka oylarini sifirla.
+                slotPlateVotes.remove(dbSlot.getSlotId());
             }
         }
 
@@ -328,31 +335,46 @@ public class OccupancySyncService {
 
     private void assignPlateFromHybridDetection(ParkingSlot slot, String areaId,
                                                 byte[] frame, ParkingSlotResultDto det) {
-        // Araç kutusu yoksa gerçek OCR yapılamaz; sahte plaka uydurmayız,
-        // slot DOLU kalır ve bir sonraki karede tekrar denenir.
-        if (det == null || !det.hasVehicleBBox()) {
-            return;
-        }
-        byte[] crop = FrameCropUtil.cropNormalizedJpeg(
-            frame,
-            det.getVehicleX(),
-            det.getVehicleY(),
-            det.getVehicleWidth(),
-            det.getVehicleHeight()
-        );
-        if (crop == null) {
-            return;
-        }
+        // Slot poligonuna maskeli OCR oku (komsu aracin plakasi kirpima girmez).
+        IYOLOInference.PlateRead read = readPlateForSlot(slot, frame, det);
 
-        IYOLOInference.PlateRead read = yoloInference.readPlateFromCrop(crop, slot.getSlotNumber());
-
-        // Gerçek OCR güvenli okuyamadıysa: sahte plaka ATAMA. Slot DOLU kalır,
-        // plaka boş gösterilir; araç netleşince sonraki karelerde gerçek plaka yazılır.
+        // Gerçek OCR güvenli okuyamadıysa: sahte plaka ATAMA, oy da ekleme.
         if (read == null || !isValidPlate(read.text) || read.confidence < MIN_PLATE_CONF) {
             return;
         }
 
-        String formatted = formatPlateForDisplay(read.text);
+        String norm = PlateMatcher.normalize(read.text);
+        if (norm.length() < 5) {
+            return;
+        }
+
+        // Coklu-kare oylama: tek-kare yanlis okumalari ele. Ayni plaka
+        // MIN_PLATE_VOTES kez okununca commit; lider olmadan slota yazma.
+        Map<String, double[]> votes =
+            slotPlateVotes.computeIfAbsent(slot.getSlotId(), k -> new HashMap<>());
+        double[] tally = votes.computeIfAbsent(norm, k -> new double[2]);
+        tally[0] += 1;
+        tally[1] += read.confidence;
+
+        String leader = null;
+        double leaderCount = 0;
+        for (Map.Entry<String, double[]> e : votes.entrySet()) {
+            if (e.getValue()[0] > leaderCount) {
+                leaderCount = e.getValue()[0];
+                leader = e.getKey();
+            }
+        }
+        if (leader == null || leaderCount < MIN_PLATE_VOTES) {
+            return;
+        }
+
+        // Ayni-plaka tekilligi: bu plaka baska dolu slota atanmissa atlama
+        // (slot 2'nin slot 3'un plakasini calmasini engeller).
+        if (isPlateActiveElsewhere(areaId, slot.getSlotId(), leader)) {
+            return;
+        }
+
+        String formatted = formatPlateForDisplay(leader);
         Vehicle vehicle = plateSimulationService.getOrCreateVehicle(formatted);
         vehicle.setCurrentAreaId(areaId);
         if (vehicle.getEntryTime() == null) {
@@ -368,6 +390,53 @@ public class OccupancySyncService {
         repository.saveVehicle(vehicle);
         repository.saveSession(session);
         repository.updateSlot(slot);
+        slotPlateVotes.remove(slot.getSlotId());
+    }
+
+    /**
+     * Slotun kalibre dörtgenine maskeli kırpımdan plaka okur; kalibrasyon yoksa
+     * araç bbox'ına düşer. Maskeleme komşu araçların plakasını dışlar.
+     */
+    private IYOLOInference.PlateRead readPlateForSlot(ParkingSlot slot, byte[] frame,
+                                                      ParkingSlotResultDto det) {
+        byte[] crop = null;
+        if (slot.hasCalibratedCorners()) {
+            double[] xs = {slot.getC1x(), slot.getC2x(), slot.getC3x(), slot.getC4x()};
+            double[] ys = {slot.getC1y(), slot.getC2y(), slot.getC3y(), slot.getC4y()};
+            crop = FrameCropUtil.cropPolygonMaskedJpeg(frame, xs, ys, 1.3, 0.05);
+        }
+        if (crop == null && det != null && det.hasVehicleBBox()) {
+            crop = FrameCropUtil.cropNormalizedJpeg(
+                frame, det.getVehicleX(), det.getVehicleY(),
+                det.getVehicleWidth(), det.getVehicleHeight());
+        }
+        if (crop == null) {
+            return null;
+        }
+        return yoloInference.readPlateFromCrop(crop, slot.getSlotNumber());
+    }
+
+    /** Verilen normalize plaka, alandaki baska bir dolu slotta aktif mi? */
+    private boolean isPlateActiveElsewhere(String areaId, String slotId, String normPlate) {
+        ParkingArea area = repository.getArea(areaId);
+        if (area == null) {
+            return false;
+        }
+        for (ParkingSlot s : area.getParkingSlots()) {
+            if (s.getSlotId().equals(slotId)) {
+                continue;
+            }
+            ParkingSession sess = repository.getActiveSessionForSlot(s.getSlotId());
+            if (sess != null && sess.getVehicle() != null
+                    && sess.getVehicle().getLicensePlate() != null) {
+                String other = PlateMatcher.normalize(
+                    sess.getVehicle().getLicensePlate().getPlateNumber());
+                if (other.equals(normPlate)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean isValidPlate(String plateText) {

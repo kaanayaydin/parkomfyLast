@@ -51,15 +51,10 @@ public class ParkingSetupService {
         }
         ParkingArea area = new ParkingArea(areaId, req.getAreaName().trim(),
             req.getAddress() != null ? req.getAddress().trim() : "");
+        area.setDescription(req.getDescription() != null ? req.getDescription().trim() : null);
+        area.setPricingPolicy(buildPricingPolicy(req, areaId));
         repository.saveAreaFull(area, lotKey);
-        ParkingAreaDto dto = new ParkingAreaDto();
-        dto.setAreaId(areaId);
-        dto.setAreaName(area.getAreaName());
-        dto.setAddress(area.getAddress());
-        dto.setLotKey(lotKey);
-        dto.setCalibrated(false);
-        dto.setSlotCount(0);
-        return dto;
+        return toAreaDto(area, lotKey, false, 0);
     }
 
     public SlotPredictionResultDto predictSlotsWithReference(byte[] imageBytes) {
@@ -161,29 +156,54 @@ public class ParkingSetupService {
         writeCalibrationJson(req.getAreaId(), req.getImageWidth(), req.getImageHeight(), jsonSlots);
         repository.markAreaCalibrated(req.getAreaId(), true);
 
-        ParkingAreaDto dto = new ParkingAreaDto();
-        dto.setAreaId(req.getAreaId());
-        dto.setAreaName(area.getAreaName());
-        dto.setAddress(area.getAddress());
-        dto.setLotKey(lotKey);
-        dto.setCalibrated(true);
-        dto.setSlotCount(req.getSlots().size());
+        ParkingAreaDto dto = toAreaDto(area, lotKey, true, req.getSlots().size());
         return dto;
     }
 
     public List<ParkingAreaDto> listAreas() {
         List<ParkingAreaDto> list = new ArrayList<>();
         for (ParkingArea a : repository.getAllAreas()) {
-            ParkingAreaDto dto = new ParkingAreaDto();
-            dto.setAreaId(a.getAreaId());
-            dto.setAreaName(a.getAreaName());
-            dto.setAddress(a.getAddress());
-            dto.setLotKey(repository.getLotKey(a.getAreaId()));
-            dto.setCalibrated(repository.isAreaCalibrated(a.getAreaId()));
-            dto.setSlotCount(a.getParkingSlots().size());
-            list.add(dto);
+            list.add(toAreaDto(a, repository.getLotKey(a.getAreaId()),
+                repository.isAreaCalibrated(a.getAreaId()), a.getParkingSlots().size()));
         }
         return list;
+    }
+
+    private ParkingAreaDto toAreaDto(ParkingArea area, String lotKey, boolean calibrated, int slotCount) {
+        ParkingAreaDto dto = new ParkingAreaDto();
+        dto.setAreaId(area.getAreaId());
+        dto.setAreaName(area.getAreaName());
+        dto.setAddress(area.getAddress());
+        dto.setDescription(area.getDescription());
+        dto.setLotKey(lotKey);
+        dto.setCalibrated(calibrated);
+        dto.setSlotCount(slotCount);
+        PricingPolicy policy = area.getPricingPolicy();
+        if (policy != null) {
+            dto.setHourlyRate(policy.getHourlyRate());
+            dto.setFirstHourRate(policy.getFirstHourRate());
+            dto.setFreeMinutes(policy.getFreeMinutes());
+            dto.setMaxDailyRate(policy.getMaxDailyRate());
+        } else {
+            dto.setHourlyRate(20.0);
+            dto.setFreeMinutes(0);
+        }
+        return dto;
+    }
+
+    private PricingPolicy buildPricingPolicy(CreateParkingAreaRequest req, String areaId) {
+        double hourly = req.getHourlyRate() != null && req.getHourlyRate() > 0 ? req.getHourlyRate() : 20.0;
+        PricingPolicy policy = new PricingPolicy(areaId, hourly);
+        if (req.getFirstHourRate() != null && req.getFirstHourRate() > 0) {
+            policy.setFirstHourRate(req.getFirstHourRate());
+        }
+        if (req.getFreeMinutes() != null && req.getFreeMinutes() >= 0) {
+            policy.setFreeMinutes(req.getFreeMinutes());
+        }
+        if (req.getMaxDailyRate() != null && req.getMaxDailyRate() > 0) {
+            policy.setMaxDailyRate(req.getMaxDailyRate());
+        }
+        return policy;
     }
 
     private void applyCorners(ParkingSlot slot, List<SlotCornerDto> corners) {

@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import com.parkomfy.security.AdminAuthFilter;
+import com.parkomfy.security.CameraControlAuthFilter;
 import com.parkomfy.api.*;
 import com.parkomfy.repository.*;
 import com.parkomfy.service.*;
@@ -39,6 +40,19 @@ public class ParkomfySpringApplication {
         registration.setFilter(new AdminAuthFilter(authService));
         registration.addUrlPatterns("/api/v1/admin/*");
         registration.setOrder(1);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<CameraControlAuthFilter> cameraControlAuthFilter(AuthService authService) {
+        FilterRegistrationBean<CameraControlAuthFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new CameraControlAuthFilter(authService));
+        registration.addUrlPatterns(
+            "/api/v1/camera/live/video",
+            "/api/v1/camera/live/predict-slots",
+            "/api/v1/camera/live/scan"
+        );
+        registration.setOrder(2);
         return registration;
     }
 
@@ -105,12 +119,13 @@ public class ParkomfySpringApplication {
 
     @Bean
     public PlateTrackingService plateTrackingService(IParkingRepository repository,
+                                                     IParkingService parkingService,
                                                      IDetectionService detectionService,
                                                      YOLOInference yoloInference,
                                                      LiveParkingService liveParkingService,
                                                      ParkingEventBroadcaster broadcaster,
                                                      NotificationService notificationService) {
-        return new PlateTrackingService(repository, detectionService, yoloInference,
+        return new PlateTrackingService(repository, parkingService, detectionService, yoloInference,
             liveParkingService, broadcaster, notificationService);
     }
 
@@ -136,9 +151,10 @@ public class ParkomfySpringApplication {
                                                        CameraSimulationService cameraSimulationService,
                                                        LiveParkingService liveParkingService,
                                                        ParkingEventBroadcaster broadcaster,
-                                                       PlateSimulationService plateSimulationService) {
+                                                       PlateSimulationService plateSimulationService,
+                                                       PlateTrackingService plateTrackingService) {
         return new OccupancySyncService(repository, yoloInference, cameraSimulationService,
-            liveParkingService, broadcaster, plateSimulationService);
+            liveParkingService, broadcaster, plateSimulationService, plateTrackingService);
     }
 
     @Bean

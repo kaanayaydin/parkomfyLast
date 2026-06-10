@@ -109,3 +109,80 @@ cd frontend && npm install && npx expo start
 Özyeğin University Academic License.
 
 **Repo:** https://github.com/erenerismis/parkomfy
+
+---
+
+## Terminalden çalıştırma (Windows)
+
+Projeyi ayağa kaldırmak için **4 ayrı terminal** açın. Proje kökü: `parkomfyLast-main`
+
+### 1) MySQL
+
+```powershell
+cd db
+.\start-mysql.bat
+```
+
+Veritabanı: `parkomfy` · kullanıcı: `root` · şifre: `password` (varsayılan)
+
+### 2) Python — gRPC + kamera simülatörü
+
+```powershell
+cd grpc_server
+pip install -r requirements.txt
+$env:PARKOMFY_SLOT_MODEL = "C:\Users\erena\repos\parkomfyLast-main\best (2).pt"
+python server.py
+```
+
+- gRPC: `localhost:50051`
+- Kamera HTTP: `localhost:50052` (`loop1` / `loop2` / `loop3`, `giris`, `cikis`)
+- Kök dizinde `loop1.mp4`, `loop2.mp4`, `loop3.mp4` ve `best (2).pt` dosyaları olmalı (Git’e dahil değil)
+
+### 3) Spring Boot (REST API + admin)
+
+```powershell
+cd C:\Users\erena\repos\parkomfyLast-main
+mvn spring-boot:run
+```
+
+- API: http://localhost:8080/api/v1/health
+- Admin panel: http://localhost:8080/admin
+- Admin giriş: `admin` / `1234` (veya `PARKOMFY_ADMIN_PASSWORD`)
+
+### 4) Mobil uygulama (Expo)
+
+```powershell
+cd frontend
+npm install
+npx expo start
+```
+
+Telefondan bağlanırken `frontend/src/config/api.js` içindeki `API_HOST_OVERRIDE` değerini bilgisayarınızın yerel IP’sine ayarlayın (ör. `192.168.1.101`).
+
+### Hızlı kontrol
+
+| Servis        | Adres |
+|---------------|--------|
+| Spring Boot   | http://localhost:8080 |
+| Admin panel   | http://localhost:8080/admin |
+| gRPC (Python) | localhost:50051 |
+| Kamera HTTP   | http://127.0.0.1:50052/snapshot/loop1.jpg |
+| MySQL         | localhost:3306 |
+
+### İlk kurulum (bir kez)
+
+```powershell
+# Java bağımlılıkları + proto stub
+mvn clean compile -DskipTests
+
+# MySQL şema (gerekirse)
+# db/schema.sql dosyasını MySQL'e import edin
+```
+
+### Test hesapları
+
+| Hesap | Rol | Şifre |
+|-------|-----|-------|
+| `admin` | Yönetici (web + mobil admin modu) | `1234` |
+| `erenersms` | Sürücü (mobil) | (kayıtlı şifre) |
+| `test@parkomfy.com` | Sürücü | (kayıtlı şifre) |

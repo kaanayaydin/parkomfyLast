@@ -167,11 +167,19 @@ public class ParkingApiController {
                 return ApiResponse.error("License plate is required", 400);
             }
             
+            String vehicleTypeRaw = request.getVehicleType();
+            if (vehicleTypeRaw == null || vehicleTypeRaw.isBlank()) {
+                vehicleTypeRaw = "CAR";
+            }
+            Vehicle.VehicleType vehicleType;
+            try {
+                vehicleType = Vehicle.VehicleType.valueOf(vehicleTypeRaw.trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return ApiResponse.error("Invalid vehicleType: " + vehicleTypeRaw, 400);
+            }
+
             // Create vehicle
             LicensePlate licensePlate = new LicensePlate(request.getLicensePlate());
-            Vehicle.VehicleType vehicleType = Vehicle.VehicleType.valueOf(
-                request.getVehicleType().toUpperCase()
-            );
             Vehicle vehicle = new Vehicle(licensePlate, vehicleType);
             
             // Save vehicle
@@ -230,14 +238,22 @@ public class ParkingApiController {
                 return ApiResponse.error("Session not found", 404);
             }
             
-            // Complete session and calculate fee
+            // Complete session and calculate fee (null when fee <= 0 / free minutes)
             Payment payment = parkingService.completeSession(session);
-            
-            // Update session - use setStatus() instead of setCompleted()
+
             session.setStatus(ParkingSession.SessionStatus.COMPLETED);
             repository.updateSession(session);
-            
-            // Return payment info
+
+            if (payment == null) {
+                PaymentDto freeExit = new PaymentDto();
+                freeExit.setSessionId(sessionId);
+                freeExit.setAmount(0.0);
+                freeExit.setCurrency("TRY");
+                freeExit.setStatus("COMPLETED");
+                freeExit.setTimestamp(LocalDateTime.now());
+                return ApiResponse.success(freeExit, "Parking session completed (no charge)", 200);
+            }
+
             PaymentDto paymentDto = new PaymentDto(payment);
             return ApiResponse.success(paymentDto, "Parking session completed", 200);
             
@@ -313,6 +329,116 @@ public class ParkingApiController {
         }
     }
     
+    /**
+     * GET /api/v1/payments?licensePlate=
+     * Ödemelerim: giriş-çıkış park ücretleri (süre + tutar).
+     */
+    public ApiResponse<List<PaymentHistoryDto>> getMyPayments(String licensePlate) {
+        try {
+            if (licensePlate == null || licensePlate.isBlank()) {
+                return ApiResponse.error("licensePlate is required", 400);
+            }
+            String normalized = com.parkomfy.util.PlateMatcher.normalize(licensePlate);
+            List<PaymentHistoryDto> list = repository.getPaymentsByPlate(normalized).stream()
+                .map(this::toPaymentHistory)
+                .collect(java.util.stream.Collectors.toList());
+            return ApiResponse.success(list, "Payments retrieved");
+        } catch (Exception e) {
+            return ApiResponse.error("Error retrieving payments: " + e.getMessage(), 500);
+        }
+    }
+
+    private PaymentHistoryDto toPaymentHistory(Payment payment) {
+        ParkingSession session = payment.getParkingSession();
+        String areaId = payment.getStoredAreaId();
+        String plate = payment.getStoredLicensePlate();
+        if (session != null) {
+            if (areaId == null && session.getParkingSlot() != null) {
+                areaId = repository.getAreaIdForSlot(session.getParkingSlot().getSlotId());
+            }
+            if (session.getVehicle() != null) {
+                if (areaId == null) {
+                    areaId = session.getVehicle().getCurrentAreaId();
+                }
+                if (plate == null && session.getVehicle().getLicensePlate() != null) {
+                    plate = session.getVehicle().getLicensePlate().getPlateNumber();
+                }
+            }
+        }
+        String areaName = null;
+        if (areaId != null) {
+            ParkingArea area = repository.getArea(areaId);
+            if (area != null) {
+                areaName = area.getAreaName();
+            }
+        }
+        PaymentHistoryDto dto = PaymentHistoryDto.from(payment, areaName, plate);
+        dto.setAreaId(areaId);
+        return dto;
+    }
+
+    /**
+     * POST /api/v1/payments/{paymentId}/pay
+     * Walk-in park ücretini öde (Stripe simülasyonu).
+     */
+    public ApiResponse<PaymentResultDto> payWalkInPayment(String paymentId) {
+        try {
+            Payment payment = repository.getPayment(paymentId);
+            if (payment == null) {
+                return ApiResponse.error("Payment not found", 404);
+            }
+            if (!payment.isPending()) {
+                return ApiResponse.error("Payment is not pending", 409);
+            }
+            if (payment.getAmount() <= 0) {
+                return ApiResponse.error("Nothing to pay", 400);
+            }
+            ParkingSession session = payment.getParkingSession();
+            if (session == null) {
+                return ApiResponse.error("Parking session not found for payment", 400);
+            }
+            session.setPayment(payment);
+
+            PaymentMethod.PaymentType paymentType = PaymentMethod.PaymentType.CREDIT_CARD;
+            PaymentMethod paymentMethod = new PaymentMethod(paymentType);
+            paymentMethod.setStripePaymentMethodId("pm_demo_walkin");
+
+            Payment processed = paymentService.processStripePayment(session, paymentMethod, payment.getAmount());
+            if (!processed.isCompleted()) {
+                return ApiResponse.error("Payment processing failed", 500);
+            }
+
+            PaymentResultDto result = new PaymentResultDto();
+            result.setSuccess(true);
+            result.setPaymentId(processed.getPaymentId());
+            result.setAmount(processed.getAmount());
+            result.setStatus("COMPLETED");
+            result.setTimestamp(LocalDateTime.now());
+            return ApiResponse.success(result, "Payment completed", 200);
+        } catch (Exception e) {
+            return ApiResponse.error("Payment failed: " + e.getMessage(), 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/payments/pending
+     * List pending walk-in / exit payments for a license plate.
+     */
+    public ApiResponse<List<PaymentDto>> getPendingPayments(String licensePlate) {
+        try {
+            if (licensePlate == null || licensePlate.isBlank()) {
+                return ApiResponse.error("licensePlate is required", 400);
+            }
+            String normalized = com.parkomfy.util.PlateMatcher.normalize(licensePlate);
+            List<PaymentDto> dtos = repository.getPendingPaymentsByPlate(normalized).stream()
+                .map(PaymentDto::new)
+                .collect(java.util.stream.Collectors.toList());
+            return ApiResponse.success(dtos, "Pending payments retrieved");
+        } catch (Exception e) {
+            return ApiResponse.error("Error retrieving pending payments: " + e.getMessage(), 500);
+        }
+    }
+    
     // ============================================
     // AVAILABLE SLOTS ENDPOINT
     // ============================================
@@ -367,14 +493,14 @@ public class ParkingApiController {
             LocalDateTime start = parseDateTime(request.getStartTime());
             LocalDateTime end = parseDateTime(request.getEndTime());
 
-            double hourlyRate = 20.0;
+            PricingPolicy pricing = parkingService.getPricingPolicyForArea(request.getAreaId());
             SlotReservation reservation = reservationService.createReservation(
                 request.getAreaId(),
                 request.getSlotId(),
                 request.getLicensePlate(),
                 start,
                 end,
-                hourlyRate);
+                pricing);
 
             LiveParkingStatusDto live = liveParkingService.getLiveStatus(request.getAreaId(), start, end);
             broadcaster.broadcastLiveStatus(live);

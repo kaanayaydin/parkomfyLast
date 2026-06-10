@@ -217,29 +217,87 @@ def calibrated_quads_norm(calibration):
     return quads
 
 
+def _bottom_center_px(corners_norm, w, h):
+    """yolov8n ile ayni: kutunun alt-orta noktasi (piksel)."""
+    xs = [c[0] * w for c in corners_norm]
+    ys = [c[1] * h for c in corners_norm]
+    return int(sum(xs) / len(xs)), int(max(ys))
+
+
+def _bbox_norm_from_corners(corners_norm):
+    xs = [c[0] for c in corners_norm]
+    ys = [c[1] for c in corners_norm]
+    vx, vy = min(xs), min(ys)
+    return vx, vy, max(xs) - vx, max(ys) - vy
+
+
+def _bestpt_point_in_polygon(quad_norm, predictions, w, h):
+    """
+    yolov8n mantigi: best.pt tespitinin alt-orta noktasi admin poligonunda mi?
+    Poligonda Dolu varsa -> dolu; sadece Bos varsa -> bos.
+    """
+    if w <= 0 or h <= 0:
+        return None
+    poly = np.array(
+        [[int(c[0] * w), int(c[1] * h)] for c in quad_norm],
+        np.int32,
+    )
+    in_poly = []
+    for pred in predictions:
+        cx, cy = _bottom_center_px(pred["corners"], w, h)
+        if cv2.pointPolygonTest(poly, (cx, cy), False) >= 0:
+            in_poly.append(pred)
+    if not in_poly:
+        return None
+    dolu = [p for p in in_poly if p.get("occupied")]
+    if dolu:
+        best = max(dolu, key=lambda p: float(p.get("confidence", 0)))
+        return True, float(best["confidence"]), best
+    return False, 0.0, max(in_poly, key=lambda p: float(p.get("confidence", 0)))
+
+
 def check_occupancy_with_model(image_bytes, quads_norm):
     """
-    For calibrated quads: run custom model on full image and match detections to slots by IoU.
-    Falls back to vehicle-in-polygon test.
+    best.pt ile yolov8n ile ayni hibrit mantik:
+      1) best.pt tespiti admin poligon icinde mi (alt-orta nokta)
+      2) yoksa IoU eslesmesi
+      3) yoksa yolov8n arac + poligon (yedek)
     """
     predictions, w, h = predict_slot_layout(image_bytes)
     results = []
-    for qi, quad in enumerate(quads_norm):
-        best_iou = 0.0
+    for quad in quads_norm:
         best_occ = False
         best_conf = 0.0
-        for pred in predictions:
-            iou = _iou_quads(quad, pred["corners"])
-            if iou > best_iou:
-                best_iou = iou
-                best_occ = pred.get("occupied", False)
-                best_conf = pred.get("confidence", 0.0)
-        if best_iou < 0.3:
-            best_occ, best_conf = _vehicle_in_quad(image_bytes, quad)
+        best_pred = None
+
+        poly_match = _bestpt_point_in_polygon(quad, predictions, w, h)
+        if poly_match is not None:
+            best_occ, best_conf, best_pred = poly_match
+        else:
+            best_iou = 0.0
+            for pred in predictions:
+                iou = _iou_quads(quad, pred["corners"])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_occ = pred.get("occupied", False)
+                    best_conf = pred.get("confidence", 0.0)
+                    best_pred = pred
+            if best_iou < 0.3:
+                best_occ, best_conf = _vehicle_in_quad(image_bytes, quad)
+                best_pred = None
+
+        vx = vy = vw = vh = 0.0
+        if best_pred is not None:
+            vx, vy, vw, vh = _bbox_norm_from_corners(best_pred["corners"])
+
         results.append({
             "corners": quad,
             "occupied": best_occ,
-            "confidence": best_conf,
+            "confidence": best_conf if best_occ else 0.0,
+            "vehicle_x": vx,
+            "vehicle_y": vy,
+            "vehicle_width": vw,
+            "vehicle_height": vh,
         })
     return results
 

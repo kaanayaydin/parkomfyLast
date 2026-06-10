@@ -1,12 +1,23 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
-import { formatDateTime } from '../config/api';
+import { formatDateTime, formatDurationSeconds } from '../config/api';
 
-const PaymentSummaryScreen = ({ onNavigate, paymentData }) => {
+const PaymentSummaryScreen = ({ onNavigate, paymentData, isWalkIn, onBack }) => {
+  const durationLabel = isWalkIn
+    ? formatDurationSeconds(paymentData?.durationSeconds)
+    : `${paymentData?.durationHours || 1} Saat`;
+  const totalFee = paymentData?.totalFee ?? 0;
+  const feeDisplay = Number.isInteger(totalFee) ? `${totalFee},00` : totalFee.toFixed(2).replace('.', ',');
+
   return (
     <SafeAreaView style={styles.container}>
+      {onBack && (
+        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+          <Text style={styles.backText}>← Geri</Text>
+        </TouchableOpacity>
+      )}
       <View style={styles.receiptCard}>
-        <Text style={styles.brand}>Parkomfy Ödeme</Text>
+        <Text style={styles.brand}>{isWalkIn ? 'Park Ücreti' : 'Parkomfy Ödeme'}</Text>
         <View style={styles.divider} />
         
         <View style={styles.row}>
@@ -15,30 +26,30 @@ const PaymentSummaryScreen = ({ onNavigate, paymentData }) => {
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Seçilen Slot:</Text>
+          <Text style={styles.label}>{isWalkIn ? 'Slot:' : 'Seçilen Slot:'}</Text>
           <Text style={styles.value}>{paymentData?.selectedSlot || '-'}</Text>
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Başlangıç:</Text>
+          <Text style={styles.label}>{isWalkIn ? 'Giriş:' : 'Başlangıç:'}</Text>
           <Text style={styles.value}>{formatDateTime(paymentData?.startTime)}</Text>
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Bitiş:</Text>
+          <Text style={styles.label}>{isWalkIn ? 'Çıkış:' : 'Bitiş:'}</Text>
           <Text style={styles.value}>{formatDateTime(paymentData?.endTime)}</Text>
         </View>
 
         <View style={styles.row}>
           <Text style={styles.label}>Süre:</Text>
-          <Text style={styles.value}>{paymentData?.durationHours || 1} Saat</Text>
+          <Text style={styles.value}>{durationLabel}</Text>
         </View>
 
         <View style={styles.divider} />
         
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Toplam:</Text>
-          <Text style={styles.totalValue}>{paymentData?.totalFee || 0},00 TL</Text>
+          <Text style={styles.totalValue}>{feeDisplay} TL</Text>
         </View>
       </View>
 
@@ -51,6 +62,8 @@ const PaymentSummaryScreen = ({ onNavigate, paymentData }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA', padding: 20, justifyContent: 'center' },
+  backBtn: { alignSelf: 'flex-start', marginBottom: 12 },
+  backText: { color: '#1A237E', fontSize: 16, fontWeight: '600' },
   receiptCard: { backgroundColor: '#FFF', padding: 30, borderRadius: 30, elevation: 5 },
   brand: { fontSize: 24, fontWeight: 'bold', color: '#1A237E', textAlign: 'center', marginBottom: 20 },
   divider: { height: 1, backgroundColor: '#EEE', marginVertical: 20 },

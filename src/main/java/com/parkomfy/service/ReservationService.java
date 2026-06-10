@@ -64,7 +64,17 @@ public class ReservationService {
     }
 
     public SlotReservation createReservation(String areaId, String slotId, String licensePlate,
-                                             LocalDateTime start, LocalDateTime end, double hourlyRate) {
+                                             LocalDateTime start, LocalDateTime end, PricingPolicy policy) {
+        if (start == null || end == null || !end.isAfter(start)) {
+            throw new IllegalArgumentException("Bitiş zamanı başlangıçtan sonra olmalıdır");
+        }
+        if (start.isBefore(LocalDateTime.now())) {
+            throw new IllegalArgumentException("Başlangıç zamanı geçmişte olamaz");
+        }
+        long hours = Duration.between(start, end).toHours();
+        if (hours > 24) {
+            throw new IllegalArgumentException("Rezervasyon süresi en fazla 24 saat olabilir");
+        }
         ParkingArea area = repository.getArea(areaId);
         if (area == null) {
             throw new IllegalArgumentException("Parking area not found: " + areaId);
@@ -94,8 +104,8 @@ public class ReservationService {
         }
 
         long minutes = Duration.between(start, end).toMinutes();
-        double hours = Math.max(1, Math.ceil(minutes / 60.0));
-        double totalFee = hours * hourlyRate;
+        PricingPolicy pricing = policy != null ? policy : new PricingPolicy("DEFAULT", 20.0);
+        double totalFee = pricing.calculateFee(minutes);
 
         SlotReservation reservation = new SlotReservation(slotId, areaId, licensePlate, start, end, totalFee);
         repository.saveReservation(reservation);
@@ -122,6 +132,9 @@ public class ReservationService {
         }
         if (reservation.getStatus() != SlotReservation.ReservationStatus.RESERVED) {
             throw new IllegalStateException("Only active reservations can be cancelled");
+        }
+        if (!reservation.getEndTime().isAfter(java.time.LocalDateTime.now())) {
+            throw new IllegalStateException("Past reservations cannot be cancelled");
         }
         reservation.setStatus(SlotReservation.ReservationStatus.CANCELLED);
         repository.updateReservation(reservation);

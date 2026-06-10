@@ -24,8 +24,8 @@ public class SchedulingConfig {
         notificationService.processReservationReminders();
     }
 
-    /** Test: 5 sn doluluk senkronu (ileride aralık uzatılacak). */
-    @Scheduled(fixedRate = 5000)
+    /** loop1 doluluk + giriş/çıkış plaka senkronu (~2 sn). */
+    @Scheduled(fixedRate = 2000)
     public void occupancySync() {
         occupancySyncService.syncAllCalibratedAreas();
     }

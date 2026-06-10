@@ -81,6 +81,31 @@ public class AuthService {
         return auth != null && "ADMIN".equalsIgnoreCase(auth.role);
     }
 
+    public User resolveUser(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        AuthToken auth = tokens.get(token.trim());
+        if (auth == null) {
+            return null;
+        }
+        return repository.getUser(auth.userId);
+    }
+
+    /** Giriş yapmış kullanıcı bu plakaya erişebilir mi? (admin tüm plakalar) */
+    public boolean canAccessPlate(String token, String licensePlate) {
+        User user = resolveUser(token);
+        if (user == null || licensePlate == null || licensePlate.isBlank()) {
+            return false;
+        }
+        if ("ADMIN".equalsIgnoreCase(user.getRole())) {
+            return true;
+        }
+        String requested = com.parkomfy.util.PlateMatcher.normalize(licensePlate);
+        String owned = com.parkomfy.util.PlateMatcher.normalize(user.getLicensePlate());
+        return !requested.isEmpty() && requested.equals(owned);
+    }
+
     public static String hashPassword(String password) {
         return ENCODER.encode(password);
     }

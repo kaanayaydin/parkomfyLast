@@ -1322,14 +1322,18 @@ class YOLODetectionServicer(detection_pb2_grpc.YOLODetectionServiceServicer):
         return detection_pb2.ParkSlotsImageResponse(image_jpeg=jpeg_bytes)
 
     def DetectBatch(self, request_iterator, context):
+        import cv_engine
         for req in request_iterator:
             image_data = req.image_data if req.image_data else b""
-            vehicle_detected = len(image_data) > 500
-            confidence = 0.88 if vehicle_detected else 0.25
+            camera_id = req.camera_id or ""
+            slot_id = req.slot_id or ""
+            vehicle_detected, confidence, boxes, _, _ = cv_engine.analyze_frame(
+                image_data, camera_id=camera_id, slot_id=slot_id
+            )
             yield detection_pb2.DetectionResponse(
                 vehicle_detected=vehicle_detected,
                 confidence=confidence,
-                bounding_boxes=[],
+                bounding_boxes=boxes,
             )
 
 

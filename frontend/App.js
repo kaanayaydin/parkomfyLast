@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Alert, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import PaymentSummaryScreen from './src/screens/PaymentSummaryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ReservationsScreen from './src/screens/ReservationsScreen';
+import PaymentsScreen from './src/screens/PaymentsScreen';
 import EntranceScreen from './src/screens/EntranceScreen';
 import AdminScreen from './src/screens/AdminScreen';
 import AdminDetailScreen from './src/screens/AdminDetailScreen';
@@ -25,12 +26,14 @@ import {
   loginUser,
   mapUserFromApi,
   connectParkingWebSocket,
+  payWalkInPayment,
 } from './src/config/api';
 import { setupPushNotifications } from './src/config/notifications';
 
 const DRIVER_TABS = [
   { id: 'Home', label: 'Otopark' },
   { id: 'Reservations', label: 'Rezervasyon' },
+  { id: 'Payments', label: 'Ödemelerim' },
   { id: 'Profile', label: 'Profil' },
   { id: 'Settings', label: 'Ayarlar' },
 ];
@@ -107,15 +110,27 @@ export default function App() {
     }
   };
 
-  const mapAreasToLots = (areas) => (areas || []).map((a) => ({
-    id: a.areaId,
-    areaId: a.areaId,
-    name: a.areaName,
-    location: a.address || '',
-    lotKey: a.lotKey || 'loop1',
-    price: 20,
-    slots: Array.from({ length: a.slotCount || 0 }, (_, i) => ({ id: i + 1, status: 'available' })),
-  }));
+  const mapAreasToLots = (areas) => (areas || []).map((a) => {
+    const hourlyRate = a.hourlyRate ?? 20;
+    const firstHourRate = a.firstHourRate ?? hourlyRate;
+    return {
+      id: a.areaId,
+      areaId: a.areaId,
+      name: a.areaName,
+      location: a.address || '',
+      lotKey: a.lotKey || 'loop1',
+      price: hourlyRate,
+      hourlyRate,
+      firstHourRate,
+      freeMinutes: a.freeMinutes ?? 0,
+      maxDailyRate: a.maxDailyRate ?? null,
+      slots: Array.from({ length: a.slotCount || 0 }, (_, i) => ({
+        id: i + 1,
+        status: 'available',
+        slotId: `SLOT-${a.lotKey || 'loop1'}-${i + 1}`,
+      })),
+    };
+  });
 
   const loadPublicAreas = async () => {
     try {
@@ -189,6 +204,9 @@ export default function App() {
     loadReservations(currentUser?.plate);
   }, [currentScreen, currentUser?.plate, adminMode]);
 
+  const parkingDataRef = useRef(parkingData);
+  parkingDataRef.current = parkingData;
+
   useEffect(() => {
     if (currentScreen === 'Login' || currentScreen === 'Register') return;
     if (adminMode) return;
@@ -226,12 +244,13 @@ export default function App() {
 
     const syncLive = async () => {
       try {
+        const lots = parkingDataRef.current;
         const hour = new Date().getHours();
         const startTime = buildDateTime(0, hour);
         const endTime = buildDateTime(0, Math.min(22, hour + 2));
-        if (!parkingData.length) return;
+        if (!lots.length) return;
         const updates = await Promise.all(
-          parkingData.map(async (lot) => {
+          lots.map(async (lot) => {
             const areaId = lot.areaId || lot.id;
             const liveRes = await getLiveParkingStatus(areaId, startTime, endTime);
             return { lotId: lot.id, live: liveRes.success ? liveRes.data : null };
@@ -247,7 +266,7 @@ export default function App() {
     const syncInterval = setInterval(syncLive, 5000);
     const disconnectWs = connectParkingWebSocket((payload) => {
       if (payload.type === 'LIVE_STATUS' && payload.data?.areaId) {
-        const lot = parkingData.find(
+        const lot = parkingDataRef.current.find(
           (p) => (p.areaId || p.id) === payload.data.areaId
         );
         if (lot) applyLiveData(lot.id, payload.data);
@@ -258,7 +277,7 @@ export default function App() {
       clearInterval(syncInterval);
       disconnectWs();
     };
-  }, [currentScreen, parkingData, adminMode]);
+  }, [currentScreen, adminMode]);
 
   const handleNavigate = (screen, data = null) => {
     if (screen === 'Slots') setSelectedParkingId(data.id);
@@ -286,6 +305,36 @@ export default function App() {
     } catch (e) {
       Alert.alert('Hata', 'Sunucuya bağlanılamadı. Spring Boot çalışıyor mu?');
     }
+  };
+
+  const finalizeWalkInPayment = async () => {
+    try {
+      const res = await payWalkInPayment(paymentData.paymentId);
+      if (!res.success) {
+        Alert.alert('Hata', res.message || 'Ödeme tamamlanamadı');
+        return;
+      }
+      Alert.alert('Başarılı', 'Park ücreti ödendi!');
+      setPaymentData(null);
+      setCurrentScreen('MainApp');
+      setActiveTab('Payments');
+    } catch {
+      Alert.alert('Hata', 'Sunucuya bağlanılamadı. Spring Boot çalışıyor mu?');
+    }
+  };
+
+  const handlePayWalkIn = (item) => {
+    handleNavigate('Payment', {
+      walkIn: true,
+      paymentId: item.paymentId,
+      sessionId: item.sessionId,
+      parkingName: item.areaName || item.areaId || 'Otopark',
+      selectedSlot: item.slotId ? item.slotId.split('-').pop() : '-',
+      startTime: item.entryTime,
+      endTime: item.exitTime,
+      durationSeconds: item.durationSeconds,
+      totalFee: item.amount,
+    });
   };
 
   const handleCancelReservation = async (reservationId) => {
@@ -346,6 +395,29 @@ export default function App() {
     if (currentScreen === 'Entrance') {
       return <EntranceScreen onBack={() => setCurrentScreen('MainApp')} />;
     }
+    if (currentScreen === 'Slots') {
+      return (
+        <SlotSelectionScreen
+          selectedParking={parkingData.find((p) => p.id === selectedParkingId)}
+          areaId={parkingData.find((p) => p.id === selectedParkingId)?.areaId || selectedParkingId}
+          licensePlate={currentUser?.plate}
+          onNavigate={handleNavigate}
+        />
+      );
+    }
+    if (currentScreen === 'Payment') {
+      return (
+        <PaymentSummaryScreen
+          paymentData={paymentData}
+          isWalkIn={paymentData?.walkIn}
+          onNavigate={paymentData?.walkIn ? finalizeWalkInPayment : finalizeBooking}
+          onBack={() => {
+            setPaymentData(null);
+            setCurrentScreen('MainApp');
+          }}
+        />
+      );
+    }
     if (activeTab === 'Profile') {
       return (
         <ProfileScreen
@@ -363,20 +435,11 @@ export default function App() {
           onCancel={handleCancelReservation}
         />
       );
-    if (currentScreen === 'Slots')
+    if (activeTab === 'Payments')
       return (
-        <SlotSelectionScreen
-          selectedParking={parkingData.find((p) => p.id === selectedParkingId)}
-          areaId={parkingData.find((p) => p.id === selectedParkingId)?.areaId || selectedParkingId}
+        <PaymentsScreen
           licensePlate={currentUser?.plate}
-          onNavigate={handleNavigate}
-        />
-      );
-    if (currentScreen === 'Payment')
-      return (
-        <PaymentSummaryScreen
-          paymentData={paymentData}
-          onNavigate={finalizeBooking}
+          onPay={handlePayWalkIn}
         />
       );
     return <HomeScreen onNavigate={handleNavigate} parkingData={parkingData} />;

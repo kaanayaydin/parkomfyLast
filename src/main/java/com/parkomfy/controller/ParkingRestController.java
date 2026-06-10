@@ -11,7 +11,9 @@ import com.parkomfy.ai.IYOLOInference;
 import com.parkomfy.model.ParkingSlotResultDto;
 import com.parkomfy.model.Camera;
 import com.parkomfy.model.ParkingSlot;
+import com.parkomfy.security.AdminAuthFilter;
 import com.parkomfy.service.AuthService;
+import com.parkomfy.model.Payment;
 import com.parkomfy.service.CameraSimulationService;
 import com.parkomfy.service.IDetectionService;
 import com.parkomfy.service.ParkingEventBroadcaster;
@@ -26,6 +28,7 @@ import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import javax.servlet.http.HttpServletRequest;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +64,29 @@ public class ParkingRestController {
 
     @Autowired
     private IParkingRepository parkingRepository;
+
+    private <T> ResponseEntity<ApiResponse<T>> unauthorizedDriver() {
+        return ResponseEntity.status(401)
+            .body(ApiResponse.error("Oturum gerekli. Giriş yapın veya plaka eşleşmiyor.", 401));
+    }
+
+    private boolean authorizePlate(HttpServletRequest req, String licensePlate) {
+        String token = req.getHeader(AdminAuthFilter.AUTH_HEADER);
+        return authService.canAccessPlate(token, licensePlate);
+    }
+
+    private boolean authorizePayment(HttpServletRequest req, String paymentId) {
+        Payment payment = parkingRepository.getPayment(paymentId);
+        if (payment == null) {
+            return false;
+        }
+        String plate = payment.getStoredLicensePlate();
+        if (plate == null && payment.getParkingSession() != null
+                && payment.getParkingSession().getVehicle() != null) {
+            plate = payment.getParkingSession().getVehicle().getLicensePlate().getPlateNumber();
+        }
+        return authorizePlate(req, plate);
+    }
     
     // ============================================
     // AUTH ENDPOINTS
@@ -194,14 +220,18 @@ public class ParkingRestController {
     @GetMapping(value = "/camera/live/snapshot", produces = MediaType.IMAGE_JPEG_VALUE)
     public ResponseEntity<byte[]> getLiveCameraSnapshot(
             @RequestParam(required = false) String lot) {
-        byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lot);
-        if (frame == null || frame.length == 0) {
+        CameraSimulationService.CameraFrame frame = cameraSimulationService.fetchLiveSnapshot(lot);
+        if (frame == null || frame.jpeg == null || frame.jpeg.length == 0) {
             return ResponseEntity.status(503).build();
         }
         return ResponseEntity.ok()
             .contentType(MediaType.IMAGE_JPEG)
-            .header("Cache-Control", "no-store")
-            .body(frame);
+            .header("Cache-Control", "no-store, no-cache, must-revalidate")
+            .header("Pragma", "no-cache")
+            .header("X-Parkomfy-Lot", frame.lot)
+            .header("X-Parkomfy-Position-Sec", String.valueOf(frame.positionSec))
+            .header("X-Parkomfy-Loop-Index", String.valueOf(frame.loopIndex))
+            .body(frame.jpeg);
     }
 
     @PostMapping("/camera/live/predict-slots")
@@ -294,7 +324,11 @@ public class ParkingRestController {
      */
     @PostMapping("/parking/reservations")
     public ResponseEntity<ApiResponse<ReservationDto>> createReservation(
-            @RequestBody CreateReservationRequest request) {
+            @RequestBody CreateReservationRequest request,
+            HttpServletRequest req) {
+        if (!authorizePlate(req, request.getLicensePlate())) {
+            return unauthorizedDriver();
+        }
         ApiResponse<ReservationDto> response = apiController.createReservation(request);
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
@@ -304,7 +338,11 @@ public class ParkingRestController {
      */
     @GetMapping("/parking/reservations")
     public ResponseEntity<ApiResponse<List<ReservationDto>>> getReservations(
-            @RequestParam String licensePlate) {
+            @RequestParam String licensePlate,
+            HttpServletRequest req) {
+        if (!authorizePlate(req, licensePlate)) {
+            return unauthorizedDriver();
+        }
         ApiResponse<List<ReservationDto>> response = apiController.getReservations(licensePlate);
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
@@ -315,7 +353,11 @@ public class ParkingRestController {
     @PostMapping("/parking/reservations/{reservationId}/cancel")
     public ResponseEntity<ApiResponse<ReservationDto>> cancelReservation(
             @PathVariable String reservationId,
-            @RequestParam String licensePlate) {
+            @RequestParam String licensePlate,
+            HttpServletRequest req) {
+        if (!authorizePlate(req, licensePlate)) {
+            return unauthorizedDriver();
+        }
         ApiResponse<ReservationDto> response = apiController.cancelReservation(reservationId, licensePlate);
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
@@ -354,6 +396,21 @@ public class ParkingRestController {
     }
     
     /**
+     * GET /api/v1/payments?licensePlate=
+     * Kullanıcının otopark giriş-çıkış ödeme geçmişi.
+     */
+    @GetMapping("/payments")
+    public ResponseEntity<ApiResponse<List<PaymentHistoryDto>>> getMyPayments(
+            @RequestParam String licensePlate,
+            HttpServletRequest req) {
+        if (!authorizePlate(req, licensePlate)) {
+            return unauthorizedDriver();
+        }
+        ApiResponse<List<PaymentHistoryDto>> response = apiController.getMyPayments(licensePlate);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
+    }
+
+    /**
      * GET /api/v1/payments/{paymentId}
      * Get payment details
      */
@@ -364,6 +421,36 @@ public class ParkingRestController {
         return ResponseEntity
             .status(response.getStatusCode())
             .body(response);
+    }
+
+    /**
+     * POST /api/v1/payments/{paymentId}/pay
+     * Walk-in çıkış ücretini öde.
+     */
+    @PostMapping("/payments/{paymentId}/pay")
+    public ResponseEntity<ApiResponse<PaymentResultDto>> payWalkInPayment(
+            @PathVariable String paymentId,
+            HttpServletRequest req) {
+        if (!authorizePayment(req, paymentId)) {
+            return unauthorizedDriver();
+        }
+        ApiResponse<PaymentResultDto> response = apiController.payWalkInPayment(paymentId);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
+    }
+
+    /**
+     * GET /api/v1/payments/pending?licensePlate=
+     * Pending walk-in exit payments for registered plate.
+     */
+    @GetMapping("/payments/pending")
+    public ResponseEntity<ApiResponse<List<PaymentDto>>> getPendingPayments(
+            @RequestParam String licensePlate,
+            HttpServletRequest req) {
+        if (!authorizePlate(req, licensePlate)) {
+            return unauthorizedDriver();
+        }
+        ApiResponse<List<PaymentDto>> response = apiController.getPendingPayments(licensePlate);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
     }
     
     // ============================================

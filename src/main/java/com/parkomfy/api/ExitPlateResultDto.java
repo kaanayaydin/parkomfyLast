@@ -7,6 +7,10 @@ public class ExitPlateResultDto {
     private String slotId;
     private double confidence;
     private boolean exited;
+    private String paymentId;
+    private double feeAmount;
+    private long durationMinutes;
+    private String userId;
 
     public String getLicensePlate() { return licensePlate; }
     public void setLicensePlate(String licensePlate) { this.licensePlate = licensePlate; }
@@ -20,4 +24,12 @@ public class ExitPlateResultDto {
     public void setConfidence(double confidence) { this.confidence = confidence; }
     public boolean isExited() { return exited; }
     public void setExited(boolean exited) { this.exited = exited; }
+    public String getPaymentId() { return paymentId; }
+    public void setPaymentId(String paymentId) { this.paymentId = paymentId; }
+    public double getFeeAmount() { return feeAmount; }
+    public void setFeeAmount(double feeAmount) { this.feeAmount = feeAmount; }
+    public long getDurationMinutes() { return durationMinutes; }
+    public void setDurationMinutes(long durationMinutes) { this.durationMinutes = durationMinutes; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
 }

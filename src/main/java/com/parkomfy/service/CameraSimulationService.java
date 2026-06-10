@@ -22,11 +22,17 @@ public class CameraSimulationService {
     private final ObjectMapper mapper = new ObjectMapper();
 
     public byte[] getLiveSnapshot() {
-        return getLiveSnapshotForLot(null);
+        CameraFrame frame = fetchLiveSnapshot(null);
+        return frame != null ? frame.jpeg : null;
     }
 
     /** lotKey: loop1, loop2, loop3 — her otopark kendi paralel stream'inden. */
     public byte[] getLiveSnapshotForLot(String lotKey) {
+        CameraFrame frame = fetchLiveSnapshot(lotKey);
+        return frame != null ? frame.jpeg : null;
+    }
+
+    public CameraFrame fetchLiveSnapshot(String lotKey) {
         try {
             String lot = normalizeLotKey(lotKey);
             URL url = new URL(CAMERA_BASE + "/snapshot/" + lot + ".jpg?t=" + System.currentTimeMillis());
@@ -34,15 +40,53 @@ public class CameraSimulationService {
             conn.setConnectTimeout(3000);
             conn.setReadTimeout(5000);
             conn.setRequestMethod("GET");
+            conn.setUseCaches(false);
             if (conn.getResponseCode() != 200) {
                 return null;
             }
+            byte[] jpeg;
             try (InputStream in = conn.getInputStream()) {
-                return in.readAllBytes();
+                jpeg = in.readAllBytes();
             }
+            String lotHeader = conn.getHeaderField("X-Parkomfy-Lot");
+            double positionSec = parseHeaderDouble(conn.getHeaderField("X-Parkomfy-Position-Sec"));
+            long loopIndex = parseHeaderLong(conn.getHeaderField("X-Parkomfy-Loop-Index"));
+            return new CameraFrame(jpeg, lotHeader != null ? lotHeader : lot, positionSec, loopIndex);
         } catch (Exception e) {
             System.err.println("Live camera snapshot failed: " + e.getMessage());
             return null;
+        }
+    }
+
+    private static double parseHeaderDouble(String v) {
+        if (v == null || v.isBlank()) return 0.0;
+        try {
+            return Double.parseDouble(v.trim());
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
+    }
+
+    private static long parseHeaderLong(String v) {
+        if (v == null || v.isBlank()) return 0L;
+        try {
+            return Long.parseLong(v.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    public static final class CameraFrame {
+        public final byte[] jpeg;
+        public final String lot;
+        public final double positionSec;
+        public final long loopIndex;
+
+        public CameraFrame(byte[] jpeg, String lot, double positionSec, long loopIndex) {
+            this.jpeg = jpeg;
+            this.lot = lot;
+            this.positionSec = positionSec;
+            this.loopIndex = loopIndex;
         }
     }
 
@@ -124,6 +168,84 @@ public class CameraSimulationService {
             return out.isEmpty() ? fallback : out;
         } catch (Exception e) {
             return fallback;
+        }
+    }
+
+    /** Giriş/çıkış plaka kamerası oynuyor mu? */
+    public boolean isGatePlaying(String gate) {
+        try {
+            JsonNode node = fetchGateStatus();
+            if (node == null) {
+                return false;
+            }
+            String key = gate != null && gate.toLowerCase().contains("cik") ? "cikis" : "giris";
+            return node.path(key).path("playing").asBoolean(false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private JsonNode fetchGateStatus() {
+        try {
+            URL url = new URL(CAMERA_BASE + "/gate/status");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(1500);
+            conn.setReadTimeout(1500);
+            conn.setRequestMethod("GET");
+            if (conn.getResponseCode() != 200) {
+                return null;
+            }
+            return mapper.readTree(conn.getInputStream());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** loop1 video oynatma konumu (giriş kamerası zaman senkronu). */
+    public Map<String, Object> getLotTimeline(String lotKey) {
+        Map<String, Object> empty = new LinkedHashMap<>();
+        try {
+            String lot = normalizeLotKey(lotKey);
+            URL url = new URL(CAMERA_BASE + "/timeline/" + lot);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(2000);
+            conn.setRequestMethod("GET");
+            if (conn.getResponseCode() != 200) {
+                return empty;
+            }
+            JsonNode node = mapper.readTree(conn.getInputStream());
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("positionSec", node.path("positionSec").asDouble(0));
+            out.put("durationSec", node.path("durationSec").asDouble(0));
+            out.put("loopIndex", node.path("loopIndex").asLong(0));
+            out.put("girisTriggerSec", node.path("girisTriggerSec").asDouble(13.5));
+            return out;
+        } catch (Exception e) {
+            return empty;
+        }
+    }
+
+    /** loop1 doluluk değişince plakaokuma.mp4 oynat (giris / cikis). */
+    public boolean triggerGate(String gate) {
+        try {
+            URL url = new URL(CAMERA_BASE + "/gate/trigger");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(3000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+            String body = mapper.writeValueAsString(Map.of("gate", gate));
+            conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            if (conn.getResponseCode() != 200) {
+                return false;
+            }
+            JsonNode node = mapper.readTree(conn.getInputStream());
+            return node.path("success").asBoolean(false);
+        } catch (Exception e) {
+            System.err.println("Gate trigger failed: " + e.getMessage());
+            return false;
         }
     }
 

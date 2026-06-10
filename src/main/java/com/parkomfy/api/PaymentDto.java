@@ -18,7 +18,9 @@ public class PaymentDto {
     
     public PaymentDto(Payment payment) {
         this.paymentId = payment.getPaymentId();
-        this.sessionId = payment.getParkingSession().getSessionId();
+        if (payment.getParkingSession() != null) {
+            this.sessionId = payment.getParkingSession().getSessionId();
+        }
         this.amount = payment.getAmount();
         this.currency = "TRY";
         this.status = payment.getStatus().toString();

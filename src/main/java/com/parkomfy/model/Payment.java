@@ -14,6 +14,13 @@ public class Payment {
     private LocalDateTime paymentTime;
     private String transactionId; // From Stripe or other payment gateway
     private ParkingSession parkingSession;
+    /** DB snapshot fields for list/detail when session is partial or missing */
+    private LocalDateTime storedEntryTime;
+    private LocalDateTime storedExitTime;
+    private long storedDurationSeconds;
+    private String storedSlotId;
+    private String storedAreaId;
+    private String storedLicensePlate;
     
     public Payment(double amount, PaymentMethod paymentMethod, ParkingSession parkingSession) {
         this.paymentId = generatePaymentId();
@@ -31,6 +38,10 @@ public class Payment {
     
     public String getPaymentId() {
         return paymentId;
+    }
+
+    public void setPaymentId(String paymentId) {
+        this.paymentId = paymentId;
     }
     
     public double getAmount() {
@@ -63,6 +74,10 @@ public class Payment {
     public LocalDateTime getPaymentTime() {
         return paymentTime;
     }
+
+    public void setPaymentTime(LocalDateTime paymentTime) {
+        this.paymentTime = paymentTime;
+    }
     
     public String getTransactionId() {
         return transactionId;
@@ -79,6 +94,19 @@ public class Payment {
     public void setParkingSession(ParkingSession parkingSession) {
         this.parkingSession = parkingSession;
     }
+
+    public LocalDateTime getStoredEntryTime() { return storedEntryTime; }
+    public void setStoredEntryTime(LocalDateTime storedEntryTime) { this.storedEntryTime = storedEntryTime; }
+    public LocalDateTime getStoredExitTime() { return storedExitTime; }
+    public void setStoredExitTime(LocalDateTime storedExitTime) { this.storedExitTime = storedExitTime; }
+    public long getStoredDurationSeconds() { return storedDurationSeconds; }
+    public void setStoredDurationSeconds(long storedDurationSeconds) { this.storedDurationSeconds = storedDurationSeconds; }
+    public String getStoredSlotId() { return storedSlotId; }
+    public void setStoredSlotId(String storedSlotId) { this.storedSlotId = storedSlotId; }
+    public String getStoredAreaId() { return storedAreaId; }
+    public void setStoredAreaId(String storedAreaId) { this.storedAreaId = storedAreaId; }
+    public String getStoredLicensePlate() { return storedLicensePlate; }
+    public void setStoredLicensePlate(String storedLicensePlate) { this.storedLicensePlate = storedLicensePlate; }
     
     public boolean isCompleted() {
         return status == PaymentStatus.COMPLETED;

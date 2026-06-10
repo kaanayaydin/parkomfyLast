@@ -45,6 +45,38 @@ function authHeaders(extra = {}) {
   return headers;
 }
 
+/** HTTP hata kontrolü + güvenli JSON parse */
+export async function fetchJson(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let json;
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      return {
+        success: false,
+        message: res.ok ? 'Sunucu yanıtı okunamadı' : `HTTP ${res.status}`,
+        statusCode: res.status,
+      };
+    }
+    if (!res.ok && json.success !== false) {
+      return {
+        success: false,
+        message: json.message || `HTTP ${res.status}`,
+        statusCode: res.status,
+        data: json.data,
+      };
+    }
+    if (json.statusCode == null) {
+      json.statusCode = res.status;
+    }
+    return json;
+  } catch (e) {
+    return { success: false, message: e.message || 'Bağlantı hatası', statusCode: 0 };
+  }
+}
+
 export const AREA_IDS = {
   istasyon1: 'AREA-001',
   istasyon2: 'AREA-002',
@@ -83,27 +115,59 @@ export async function getAvailableSlots(areaId, startTime, endTime) {
 }
 
 export async function createReservation({ areaId, slotId, licensePlate, startTime, endTime }) {
-  const res = await fetch(`${API_BASE}/parking/reservations`, {
+  return fetchJson(`${API_BASE}/parking/reservations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ areaId, slotId, licensePlate, startTime, endTime }),
   });
-  return res.json();
+}
+
+export async function getMyPayments(licensePlate) {
+  return fetchJson(
+    `${API_BASE}/payments?licensePlate=${encodeURIComponent(licensePlate)}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function payWalkInPayment(paymentId) {
+  return fetchJson(`${API_BASE}/payments/${encodeURIComponent(paymentId)}/pay`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+  });
+}
+
+export function formatDurationSeconds(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h} sa ${m} dk ${sec} sn`;
+  if (m > 0) return `${m} dk ${sec} sn`;
+  return `${sec} sn`;
+}
+
+export function paymentStatusLabel(status) {
+  switch (status) {
+    case 'PENDING': return 'Ödeme bekliyor';
+    case 'COMPLETED': return 'Ödendi';
+    case 'FAILED': return 'Başarısız';
+    case 'REFUNDED': return 'İade';
+    default: return status || '-';
+  }
 }
 
 export async function getReservations(licensePlate) {
-  const res = await fetch(
-    `${API_BASE}/parking/reservations?licensePlate=${encodeURIComponent(licensePlate)}`
+  return fetchJson(
+    `${API_BASE}/parking/reservations?licensePlate=${encodeURIComponent(licensePlate)}`,
+    { headers: authHeaders() }
   );
-  return res.json();
 }
 
 export async function cancelReservation(reservationId, licensePlate) {
-  const res = await fetch(
+  return fetchJson(
     `${API_BASE}/parking/reservations/${encodeURIComponent(reservationId)}/cancel?licensePlate=${encodeURIComponent(licensePlate)}`,
-    { method: 'POST' }
+    { method: 'POST', headers: authHeaders() }
   );
-  return res.json();
 }
 
 export function reservationStatusLabel(status) {
@@ -116,8 +180,58 @@ export function reservationStatusLabel(status) {
   }
 }
 
+/** Admin panelde girilen tarife ile uyumlu ücret (PricingPolicy.calculateFee). */
+export function calculateParkingFee(durationMinutes, pricing = {}) {
+  const hourlyRate = pricing.hourlyRate ?? pricing.price ?? 20;
+  const firstHourRate = pricing.firstHourRate ?? hourlyRate;
+  const freeMinutes = pricing.freeMinutes ?? 0;
+  const maxDailyRate = pricing.maxDailyRate ?? hourlyRate * 24;
+  const mins = Math.max(0, Math.ceil(durationMinutes));
+  if (mins <= freeMinutes) return 0;
+  const billable = mins - freeMinutes;
+  const hours = Math.ceil(billable / 60);
+  let fee = hours <= 1 ? firstHourRate : firstHourRate + (hours - 1) * hourlyRate;
+  if (fee > maxDailyRate) fee = maxDailyRate;
+  return Math.round(fee * 100) / 100;
+}
+
 export function canCancelReservation(item) {
-  return item?.status === 'RESERVED' && item?.reservationId;
+  if (!item?.reservationId || item?.status !== 'RESERVED') return false;
+  return getReservationCategory(item) === 'active';
+}
+
+function parseReservationDate(iso) {
+  if (!iso) return null;
+  const s = iso.length === 19 ? iso : iso.substring(0, 19);
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** active | past | cancelled */
+export function getReservationCategory(item) {
+  if (item?.status === 'CANCELLED') return 'cancelled';
+  const end = parseReservationDate(item?.endTime);
+  const now = new Date();
+  if (item?.status === 'COMPLETED') return 'past';
+  if (end && end <= now) return 'past';
+  if (item?.status === 'RESERVED' || item?.status === 'ACTIVE') return 'active';
+  return 'past';
+}
+
+export function groupReservations(reservations) {
+  const groups = { active: [], past: [], cancelled: [] };
+  (reservations || []).forEach((r) => {
+    groups[getReservationCategory(r)].push(r);
+  });
+  const byStartDesc = (a, b) => {
+    const ta = parseReservationDate(a.startTime)?.getTime() || 0;
+    const tb = parseReservationDate(b.startTime)?.getTime() || 0;
+    return tb - ta;
+  };
+  groups.active.sort(byStartDesc);
+  groups.past.sort(byStartDesc);
+  groups.cancelled.sort(byStartDesc);
+  return groups;
 }
 
 /** YYYY-MM-DDTHH:mm:00 for backend from a full Date */
@@ -358,6 +472,9 @@ export async function createParkingArea({ areaName, address, lotKey }) {
   return res.json();
 }
 
+/** Admin web ile aynı snapshot polling aralığı (ms) */
+export const LIVE_CAMERA_POLL_MS = 100;
+
 export function getLiveCameraSnapshotUrl(lotKey = 'loop1', cacheBust = Date.now()) {
   const lot = String(lotKey || 'loop1').replace('.mp4', '');
   return `${API_BASE}/camera/live/snapshot?lot=${encodeURIComponent(lot)}&t=${cacheBust}`;
@@ -369,16 +486,17 @@ export async function getLiveCameraStatus() {
 }
 
 export async function predictSlotsFromLiveCamera() {
-  const res = await fetch(`${API_BASE}/camera/live/predict-slots`, { method: 'POST' });
-  return res.json();
+  return fetchJson(`${API_BASE}/camera/live/predict-slots`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
 }
 
 export async function scanLiveCamera(areaId) {
-  const res = await fetch(
+  return fetchJson(
     `${API_BASE}/camera/live/scan?areaId=${encodeURIComponent(areaId)}`,
-    { method: 'POST' }
+    { method: 'POST', headers: authHeaders() }
   );
-  return res.json();
 }
 
 export async function predictSlotLayout(imageUri) {

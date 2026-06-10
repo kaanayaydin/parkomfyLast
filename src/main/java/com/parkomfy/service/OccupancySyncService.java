@@ -13,9 +13,12 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
- * Hibrit doluluk: kalibre poligon + yolov8n araç merkezi (gRPC/Python).
+ * Hibrit doluluk: kalibre poligon + best.pt (Bos/Dolu); yoksa yolov8n fallback.
  * Her otopark kendi video stream'inden (loop1/2/3) eşzamanlı okunur.
  * Plaka: slot yeni dolunca araç kırpımı OCR.
  */
@@ -23,26 +26,35 @@ public class OccupancySyncService {
 
     private static final double MIN_OCC_CONF = 0.25;
     private static final double MIN_PLATE_CONF = 0.55;
-
     private final IParkingRepository repository;
     private final IYOLOInference yoloInference;
     private final CameraSimulationService cameraSimulationService;
     private final LiveParkingService liveParkingService;
     private final ParkingEventBroadcaster broadcaster;
     private final PlateSimulationService plateSimulationService;
+    private final PlateTrackingService plateTrackingService;
+    private final Map<String, Boolean> girisPlayingLast = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> cikisPlayingLast = new ConcurrentHashMap<>();
+    private final ExecutorService gateExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "gate-plate-sync");
+        t.setDaemon(true);
+        return t;
+    });
 
     public OccupancySyncService(IParkingRepository repository,
                                 IYOLOInference yoloInference,
                                 CameraSimulationService cameraSimulationService,
                                 LiveParkingService liveParkingService,
                                 ParkingEventBroadcaster broadcaster,
-                                PlateSimulationService plateSimulationService) {
+                                PlateSimulationService plateSimulationService,
+                                PlateTrackingService plateTrackingService) {
         this.repository = repository;
         this.yoloInference = yoloInference;
         this.cameraSimulationService = cameraSimulationService;
         this.liveParkingService = liveParkingService;
         this.broadcaster = broadcaster;
         this.plateSimulationService = plateSimulationService;
+        this.plateTrackingService = plateTrackingService;
     }
 
     /**
@@ -249,6 +261,16 @@ public class OccupancySyncService {
             }
         }
 
+        int occupiedCount = 0;
+        for (ParkingSlot dbSlot : dbSlots) {
+            ParkingSlotResultDto det = bySlotNumber.get(dbSlot.getSlotNumber());
+            if (det != null && det.isOccupied() && det.getConfidence() >= MIN_OCC_CONF) {
+                occupiedCount++;
+            }
+        }
+        watchGateEntranceComplete(areaId, lotKey);
+        watchGateExitComplete(areaId, lotKey);
+
         try {
             byte[] annotated = yoloInference.getParkingSlotsAnnotatedImage(frame, areaId);
             if (annotated != null && annotated.length > 0) {
@@ -260,6 +282,47 @@ public class OccupancySyncService {
         LiveParkingStatusDto live = liveParkingService.getLiveStatus(areaId, null, null);
         if (live != null) {
             broadcaster.broadcastLiveStatus(live);
+        }
+    }
+
+    /** Giriş plaka videosu bitince DB'ye plaka yaz (video Python'da tetiklenir). */
+    private void watchGateEntranceComplete(String areaId, String lotKey) {
+        if (!"loop1".equals(lotKey)) {
+            return;
+        }
+        boolean playing = cameraSimulationService.isGatePlaying("giris");
+        Boolean was = girisPlayingLast.get(areaId);
+        girisPlayingLast.put(areaId, playing);
+        if (Boolean.TRUE.equals(was) && !playing) {
+            gateExecutor.submit(this::processEntrancePlate);
+        }
+    }
+
+
+    /** Çıkış plaka videosu bitince çıkış OCR (video Python'da loop1 sonunda tetiklenir). */
+    private void watchGateExitComplete(String areaId, String lotKey) {
+        if (!"loop1".equals(lotKey)) {
+            return;
+        }
+        boolean playing = cameraSimulationService.isGatePlaying("cikis");
+        Boolean was = cikisPlayingLast.get(areaId);
+        cikisPlayingLast.put(areaId, playing);
+        if (Boolean.TRUE.equals(was) && !playing) {
+            gateExecutor.submit(this::processExitPlate);
+        }
+    }
+
+    private void processEntrancePlate() {
+        byte[] snap = cameraSimulationService.getLiveSnapshotForLot("giris");
+        if (snap != null && snap.length > 0) {
+            plateTrackingService.processEntrance(snap);
+        }
+    }
+
+    private void processExitPlate() {
+        byte[] snap = cameraSimulationService.getLiveSnapshotForLot("cikis");
+        if (snap != null && snap.length > 0) {
+            plateTrackingService.processExit(snap);
         }
     }
 
@@ -291,12 +354,18 @@ public class OccupancySyncService {
 
         String formatted = formatPlateForDisplay(read.text);
         Vehicle vehicle = plateSimulationService.getOrCreateVehicle(formatted);
+        vehicle.setCurrentAreaId(areaId);
+        if (vehicle.getEntryTime() == null) {
+            vehicle.setEntryTime(LocalDateTime.now());
+        }
         if (slot.isAvailable()) {
             slot.occupy(vehicle);
         } else {
             slot.setCurrentVehicle(vehicle);
         }
         ParkingSession session = new ParkingSession(vehicle, slot);
+        session.setEntryTime(vehicle.getEntryTime());
+        repository.saveVehicle(vehicle);
         repository.saveSession(session);
         repository.updateSlot(slot);
     }

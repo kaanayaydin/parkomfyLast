@@ -27,6 +27,7 @@ public class DatabaseManager implements IParkingRepository {
     private final Map<String, List<String>> demoPushTokens = new HashMap<>();
     private final Map<String, String> demoLotKeys = new HashMap<>();
     private final Map<String, Boolean> demoCalibrated = new HashMap<>();
+    private final List<Payment> demoPayments = new ArrayList<>();
     private boolean useDemoData;
     
     public DatabaseManager(String url, String username, String password) {
@@ -146,6 +147,18 @@ public class DatabaseManager implements IParkingRepository {
                 "exit_time DATETIME NULL, " +
                 "status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE')");
             stmt.executeUpdate(
+                "CREATE TABLE IF NOT EXISTS payments (" +
+                "payment_id VARCHAR(64) PRIMARY KEY, " +
+                "session_id VARCHAR(64) NULL, " +
+                "user_id VARCHAR(64) NULL, " +
+                "license_plate VARCHAR(32) NULL, " +
+                "amount DECIMAL(10,2) NOT NULL, " +
+                "status VARCHAR(16) NOT NULL DEFAULT 'PENDING', " +
+                "payment_method VARCHAR(32) NULL, " +
+                "transaction_id VARCHAR(128) NULL, " +
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                "paid_at DATETIME NULL)");
+            stmt.executeUpdate(
                 "CREATE TABLE IF NOT EXISTS detection_results (" +
                 "detection_id VARCHAR(64) PRIMARY KEY, " +
                 "camera_id VARCHAR(64) NOT NULL, " +
@@ -195,6 +208,17 @@ public class DatabaseManager implements IParkingRepository {
         String[] alters = {
             "ALTER TABLE parking_areas ADD COLUMN lot_key VARCHAR(32) NULL",
             "ALTER TABLE parking_areas ADD COLUMN calibrated TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE parking_areas ADD COLUMN description VARCHAR(255) NULL",
+            "ALTER TABLE parking_areas ADD COLUMN hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 20",
+            "ALTER TABLE parking_areas ADD COLUMN first_hour_rate DECIMAL(10,2) NULL",
+            "ALTER TABLE parking_areas ADD COLUMN free_minutes INT NOT NULL DEFAULT 0",
+            "ALTER TABLE parking_areas ADD COLUMN max_daily_rate DECIMAL(10,2) NULL",
+            "ALTER TABLE vehicles ADD COLUMN area_id VARCHAR(32) NULL",
+            "ALTER TABLE payments ADD COLUMN entry_time DATETIME NULL",
+            "ALTER TABLE payments ADD COLUMN exit_time DATETIME NULL",
+            "ALTER TABLE payments ADD COLUMN duration_seconds INT NOT NULL DEFAULT 0",
+            "ALTER TABLE payments ADD COLUMN slot_id VARCHAR(64) NULL",
+            "ALTER TABLE payments ADD COLUMN area_id VARCHAR(32) NULL",
             "ALTER TABLE parking_slots ADD COLUMN c1x DOUBLE NULL, ADD COLUMN c1y DOUBLE NULL",
             "ALTER TABLE parking_slots ADD COLUMN c2x DOUBLE NULL, ADD COLUMN c2y DOUBLE NULL",
             "ALTER TABLE parking_slots ADD COLUMN c3x DOUBLE NULL, ADD COLUMN c3y DOUBLE NULL",
@@ -227,6 +251,7 @@ public class DatabaseManager implements IParkingRepository {
             area.addParkingSlot(slot);
         }
         demoAreas.put("AREA-004", area);
+        area.setPricingPolicy(new PricingPolicy("AREA-004", 20.0));
         demoLotKeys.put("AREA-004", "loop1");
         demoCalibrated.put("AREA-004", true);
     }
@@ -256,12 +281,31 @@ public class DatabaseManager implements IParkingRepository {
             return;
         }
         try (PreparedStatement ps = connection.prepareStatement(
-                "INSERT INTO parking_areas (area_id, area_name, address, lot_key, calibrated) VALUES (?,?,?,?,0) " +
-                "ON DUPLICATE KEY UPDATE area_name = VALUES(area_name), address = VALUES(address), lot_key = VALUES(lot_key)")) {
+                "INSERT INTO parking_areas (area_id, area_name, address, lot_key, calibrated, description, " +
+                "hourly_rate, first_hour_rate, free_minutes, max_daily_rate) VALUES (?,?,?,?,0,?,?,?,?,?) " +
+                "ON DUPLICATE KEY UPDATE area_name = VALUES(area_name), address = VALUES(address), " +
+                "lot_key = VALUES(lot_key), description = VALUES(description), hourly_rate = VALUES(hourly_rate), " +
+                "first_hour_rate = VALUES(first_hour_rate), free_minutes = VALUES(free_minutes), " +
+                "max_daily_rate = VALUES(max_daily_rate)")) {
+            PricingPolicy policy = area.getPricingPolicy();
+            double hourly = policy != null ? policy.getHourlyRate() : 20.0;
             ps.setString(1, area.getAreaId());
             ps.setString(2, area.getAreaName());
             ps.setString(3, area.getAddress());
             ps.setString(4, lotKey);
+            ps.setString(5, area.getDescription());
+            ps.setDouble(6, hourly);
+            if (policy != null && policy.getFirstHourRate() != hourly) {
+                ps.setDouble(7, policy.getFirstHourRate());
+            } else {
+                ps.setNull(7, Types.DOUBLE);
+            }
+            ps.setInt(8, policy != null ? policy.getFreeMinutes() : 0);
+            if (policy != null && policy.getMaxDailyRate() > 0) {
+                ps.setDouble(9, policy.getMaxDailyRate());
+            } else {
+                ps.setNull(9, Types.DOUBLE);
+            }
             ps.executeUpdate();
         } catch (SQLException e) {
             System.err.println("saveAreaFull failed: " + e.getMessage());
@@ -357,6 +401,7 @@ public class DatabaseManager implements IParkingRepository {
             demoDetections.clear();
             demoLotKeys.clear();
             demoCalibrated.clear();
+            demoPayments.clear();
             demoVehicles.clear();
             return;
         }
@@ -365,7 +410,9 @@ public class DatabaseManager implements IParkingRepository {
         }
         String[] sqls = {
             "DELETE FROM slot_reservations",
+            "DELETE FROM payments",
             "DELETE FROM parking_sessions",
+            "DELETE FROM vehicles",
             "DELETE FROM detection_results",
             "DELETE FROM parking_slots",
             "DELETE FROM parking_areas"
@@ -415,7 +462,8 @@ public class DatabaseManager implements IParkingRepository {
             return demoAreas.get(areaId);
         }
         try (PreparedStatement ps = connection.prepareStatement(
-                "SELECT area_id, area_name, address FROM parking_areas WHERE area_id = ?")) {
+                "SELECT area_id, area_name, address, description, hourly_rate, first_hour_rate, free_minutes, max_daily_rate " +
+                "FROM parking_areas WHERE area_id = ?")) {
             ps.setString(1, areaId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
@@ -425,6 +473,10 @@ public class DatabaseManager implements IParkingRepository {
                     rs.getString("area_id"),
                     rs.getString("area_name"),
                     rs.getString("address"));
+                try {
+                    area.setDescription(rs.getString("description"));
+                } catch (SQLException ignored) { }
+                area.setPricingPolicy(mapPricingPolicy(rs, areaId));
                 for (ParkingSlot slot : getAllSlots(areaId)) {
                     area.addParkingSlot(slot);
                 }
@@ -557,14 +609,16 @@ public class DatabaseManager implements IParkingRepository {
             return;
         }
         try (PreparedStatement ps = connection.prepareStatement(
-                "INSERT INTO vehicles (vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id) " +
-                "VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), exit_time = VALUES(exit_time)")) {
+                "INSERT INTO vehicles (vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id, area_id) " +
+                "VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), " +
+                "exit_time = VALUES(exit_time), user_id = VALUES(user_id), area_id = VALUES(area_id)")) {
             ps.setString(1, vehicle.getVehicleId());
             ps.setString(2, normalizePlate(vehicle.getLicensePlate()));
             ps.setString(3, vehicle.getVehicleType() != null ? vehicle.getVehicleType().name() : "CAR");
             ps.setTimestamp(4, Timestamp.valueOf(vehicle.getEntryTime()));
             ps.setTimestamp(5, vehicle.getExitTime() != null ? Timestamp.valueOf(vehicle.getExitTime()) : null);
             ps.setString(6, vehicle.getUserId());
+            ps.setString(7, vehicle.getCurrentAreaId());
             ps.executeUpdate();
         } catch (SQLException e) {
             System.err.println("saveVehicle failed: " + e.getMessage());
@@ -787,16 +841,283 @@ public class DatabaseManager implements IParkingRepository {
     
     @Override
     public void savePayment(Payment payment) {
-        System.out.println("Saving payment: " + payment.getPaymentId() + " - Amount: " + payment.getAmount());
+        if (isDemoMode()) {
+            demoPayments.add(payment);
+            return;
+        }
+        ParkingSession session = payment.getParkingSession();
+        String sessionId = session != null ? session.getSessionId() : null;
+        String userId = null;
+        String plate = null;
+        if (session != null && session.getVehicle() != null) {
+            userId = session.getVehicle().getUserId();
+            if (session.getVehicle().getLicensePlate() != null) {
+                plate = normalizePlate(session.getVehicle().getLicensePlate());
+            }
+            if (userId == null && plate != null) {
+                User user = getUserByLicensePlate(plate);
+                if (user != null) {
+                    userId = user.getUserId();
+                }
+            }
+        }
+        LocalDateTime entryTime = session != null ? session.getEntryTime() : null;
+        LocalDateTime exitTime = session != null ? session.getExitTime() : null;
+        long durationSeconds = 0;
+        if (entryTime != null && exitTime != null) {
+            durationSeconds = java.time.Duration.between(entryTime, exitTime).getSeconds();
+        } else if (session != null) {
+            durationSeconds = session.getDurationMinutes() * 60;
+        }
+        String slotId = session != null && session.getParkingSlot() != null
+            ? session.getParkingSlot().getSlotId() : null;
+        String areaId = slotId != null ? getAreaIdForSlot(slotId) : null;
+        if (areaId == null && session != null && session.getVehicle() != null) {
+            areaId = session.getVehicle().getCurrentAreaId();
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "INSERT INTO payments (payment_id, session_id, user_id, license_plate, amount, status, " +
+                "payment_method, transaction_id, created_at, paid_at, entry_time, exit_time, duration_seconds, " +
+                "slot_id, area_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+                "ON DUPLICATE KEY UPDATE amount = VALUES(amount), status = VALUES(status), " +
+                "transaction_id = VALUES(transaction_id), paid_at = VALUES(paid_at), " +
+                "entry_time = VALUES(entry_time), exit_time = VALUES(exit_time), " +
+                "duration_seconds = VALUES(duration_seconds), slot_id = VALUES(slot_id), area_id = VALUES(area_id)")) {
+            ps.setString(1, payment.getPaymentId());
+            ps.setString(2, sessionId);
+            ps.setString(3, userId);
+            ps.setString(4, plate);
+            ps.setDouble(5, payment.getAmount());
+            ps.setString(6, payment.getStatus().name());
+            ps.setString(7, payment.getPaymentMethod() != null ? payment.getPaymentMethod().getType().name() : null);
+            ps.setString(8, payment.getTransactionId());
+            ps.setTimestamp(9, Timestamp.valueOf(payment.getPaymentTime()));
+            ps.setTimestamp(10, payment.isCompleted() ? Timestamp.valueOf(payment.getPaymentTime()) : null);
+            ps.setTimestamp(11, entryTime != null ? Timestamp.valueOf(entryTime) : null);
+            ps.setTimestamp(12, exitTime != null ? Timestamp.valueOf(exitTime) : null);
+            ps.setLong(13, durationSeconds);
+            ps.setString(14, slotId);
+            ps.setString(15, areaId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("savePayment failed: " + e.getMessage());
+        }
     }
     
     @Override
     public void updatePayment(Payment payment) {
-        System.out.println("Updating payment: " + payment.getPaymentId());
+        savePayment(payment);
     }
     
+    private static final String PAYMENT_SELECT_COLUMNS =
+        "payment_id, session_id, license_plate, amount, status, payment_method, " +
+        "transaction_id, created_at, paid_at, entry_time, exit_time, duration_seconds, slot_id, area_id";
+
     @Override
     public Payment getPayment(String paymentId) {
+        if (isDemoMode()) {
+            return demoPayments.stream().filter(p -> p.getPaymentId().equals(paymentId)).findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT " + PAYMENT_SELECT_COLUMNS + " FROM payments WHERE payment_id = ?")) {
+            ps.setString(1, paymentId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapPayment(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getPayment failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public Payment getPaymentBySessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        if (isDemoMode()) {
+            return demoPayments.stream()
+                .filter(p -> p.getParkingSession() != null
+                    && sessionId.equals(p.getParkingSession().getSessionId()))
+                .findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT " + PAYMENT_SELECT_COLUMNS + " FROM payments WHERE session_id = ? ORDER BY created_at DESC LIMIT 1")) {
+            ps.setString(1, sessionId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapPayment(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getPaymentBySessionId failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public Payment getLatestPaymentForPlate(String normalizedPlate) {
+        if (normalizedPlate == null || normalizedPlate.isBlank()) {
+            return null;
+        }
+        if (isDemoMode()) {
+            return demoPayments.stream()
+                .filter(p -> matchesPaymentPlate(p, normalizedPlate))
+                .reduce((a, b) -> b)
+                .orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT " + PAYMENT_SELECT_COLUMNS + " FROM payments WHERE license_plate = ? ORDER BY created_at DESC LIMIT 1")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapPayment(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getLatestPaymentForPlate failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public List<Payment> getPendingPaymentsByPlate(String normalizedPlate) {
+        if (normalizedPlate == null || normalizedPlate.isBlank()) {
+            return List.of();
+        }
+        if (isDemoMode()) {
+            return demoPayments.stream()
+                .filter(p -> p.isPending() && matchesPaymentPlate(p, normalizedPlate))
+                .collect(java.util.stream.Collectors.toList());
+        }
+        List<Payment> list = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT payment_id, session_id, amount, status, payment_method, transaction_id, created_at, paid_at " +
+                "FROM payments WHERE status = 'PENDING' AND license_plate = ? ORDER BY created_at DESC")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) list.add(mapPayment(rs));
+            }
+        } catch (SQLException e) {
+            System.err.println("getPendingPaymentsByPlate failed: " + e.getMessage());
+        }
+        return list;
+    }
+
+    @Override
+    public List<Payment> getPaymentsByPlate(String normalizedPlate) {
+        if (normalizedPlate == null || normalizedPlate.isBlank()) {
+            return List.of();
+        }
+        if (isDemoMode()) {
+            return demoPayments.stream()
+                .filter(p -> matchesPaymentPlate(p, normalizedPlate))
+                .collect(java.util.stream.Collectors.toList());
+        }
+        List<Payment> list = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT " + PAYMENT_SELECT_COLUMNS + " FROM payments WHERE license_plate = ? " +
+                "AND amount > 0 ORDER BY created_at DESC LIMIT 100")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) list.add(mapPayment(rs));
+            }
+        } catch (SQLException e) {
+            System.err.println("getPaymentsByPlate failed: " + e.getMessage());
+        }
+        return list;
+    }
+
+    @Override
+    public List<Payment> getPendingPaymentsByUserId(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        if (isDemoMode()) {
+            return demoPayments.stream()
+                .filter(p -> p.isPending())
+                .collect(java.util.stream.Collectors.toList());
+        }
+        List<Payment> list = new ArrayList<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT payment_id, session_id, amount, status, payment_method, transaction_id, created_at, paid_at " +
+                "FROM payments WHERE status = 'PENDING' AND user_id = ? ORDER BY created_at DESC")) {
+            ps.setString(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) list.add(mapPayment(rs));
+            }
+        } catch (SQLException e) {
+            System.err.println("getPendingPaymentsByUserId failed: " + e.getMessage());
+        }
+        return list;
+    }
+
+    @Override
+    public User getUserByLicensePlate(String normalizedPlate) {
+        if (normalizedPlate == null || normalizedPlate.isBlank()) {
+            return null;
+        }
+        if (isDemoMode()) {
+            return demoUsers.values().stream()
+                .filter(u -> u.getLicensePlate() != null
+                    && normalizePlateString(u.getLicensePlate()).equals(normalizedPlate))
+                .findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT user_id, email, password_hash, full_name, license_plate, role, created_at FROM users " +
+                "WHERE REPLACE(REPLACE(UPPER(license_plate), ' ', ''), '-', '') = ? LIMIT 1")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapUser(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getUserByLicensePlate failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public String getAreaIdForSlot(String slotId) {
+        if (slotId == null || slotId.isBlank()) {
+            return null;
+        }
+        if (isDemoMode()) {
+            for (ParkingArea area : demoAreas.values()) {
+                if (area.getSlotById(slotId) != null) {
+                    return area.getAreaId();
+                }
+            }
+            return null;
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT area_id FROM parking_slots WHERE slot_id = ?")) {
+            ps.setString(1, slotId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getString(1);
+            }
+        } catch (SQLException e) {
+            System.err.println("getAreaIdForSlot failed: " + e.getMessage());
+        }
+        return resolveAreaIdFromSlotId(slotId);
+    }
+
+    @Override
+    public Vehicle getOpenVehicleByPlate(String normalizedPlate) {
+        if (normalizedPlate == null || normalizedPlate.isBlank()) {
+            return null;
+        }
+        if (isDemoMode()) {
+            return demoVehicles.values().stream()
+                .filter(v -> v.getExitTime() == null && v.getLicensePlate() != null
+                    && normalizePlate(v.getLicensePlate()).equals(normalizedPlate))
+                .findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id, area_id FROM vehicles " +
+                "WHERE license_plate = ? AND exit_time IS NULL ORDER BY entry_time DESC LIMIT 1")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapVehicle(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getOpenVehicleByPlate failed: " + e.getMessage());
+        }
         return null;
     }
     
@@ -1226,6 +1547,9 @@ public class DatabaseManager implements IParkingRepository {
             v.setExitTime(rs.getTimestamp("exit_time").toLocalDateTime());
         }
         v.setUserId(rs.getString("user_id"));
+        try {
+            v.setCurrentAreaId(rs.getString("area_id"));
+        } catch (SQLException ignored) { }
         return v;
     }
 
@@ -1268,11 +1592,115 @@ public class DatabaseManager implements IParkingRepository {
 
     private String resolveAreaId(ParkingSlot slot) {
         if (slot == null) return null;
-        String slotId = slot.getSlotId();
+        String fromDb = getAreaIdForSlot(slot.getSlotId());
+        if (fromDb != null) return fromDb;
+        return resolveAreaIdFromSlotId(slot.getSlotId());
+    }
+
+    private String resolveAreaIdFromSlotId(String slotId) {
+        if (slotId == null) return null;
+        if (slotId.contains("loop1")) return "AREA-004";
         if (slotId.contains("istasyon1")) return "AREA-001";
         if (slotId.contains("istasyon2")) return "AREA-002";
         if (slotId.contains("istasyon3")) return "AREA-003";
         return null;
+    }
+
+    private PricingPolicy mapPricingPolicy(ResultSet rs, String areaId) throws SQLException {
+        double hourly = 20.0;
+        try {
+            hourly = rs.getDouble("hourly_rate");
+            if (rs.wasNull()) hourly = 20.0;
+        } catch (SQLException e) {
+            return new PricingPolicy(areaId, 20.0);
+        }
+        PricingPolicy policy = new PricingPolicy(areaId, hourly);
+        try {
+            double firstHour = rs.getDouble("first_hour_rate");
+            if (!rs.wasNull()) policy.setFirstHourRate(firstHour);
+            policy.setFreeMinutes(rs.getInt("free_minutes"));
+            double maxDaily = rs.getDouble("max_daily_rate");
+            if (!rs.wasNull()) policy.setMaxDailyRate(maxDaily);
+        } catch (SQLException ignored) { }
+        return policy;
+    }
+
+    private Payment mapPayment(ResultSet rs) throws SQLException {
+        String sessionId = rs.getString("session_id");
+        ParkingSession session = sessionId != null ? getSession(sessionId) : null;
+        String plateText = null;
+        try { plateText = rs.getString("license_plate"); } catch (SQLException ignored) { }
+        LocalDateTime entryTime = null;
+        LocalDateTime exitTime = null;
+        long durationSeconds = 0;
+        String slotId = null;
+        String areaId = null;
+        try {
+            if (rs.getTimestamp("entry_time") != null) {
+                entryTime = rs.getTimestamp("entry_time").toLocalDateTime();
+            }
+            if (rs.getTimestamp("exit_time") != null) {
+                exitTime = rs.getTimestamp("exit_time").toLocalDateTime();
+            }
+            durationSeconds = rs.getLong("duration_seconds");
+            slotId = rs.getString("slot_id");
+            areaId = rs.getString("area_id");
+        } catch (SQLException ignored) { }
+
+        if (session == null) {
+            Vehicle v = new Vehicle(new LicensePlate(plateText != null ? plateText : "UNKNOWN"));
+            ParkingSlot slot = slotId != null
+                ? new ParkingSlot(slotId, 0, "A", 1)
+                : new ParkingSlot("GATE", 0, "A", 0);
+            session = new ParkingSession(v, slot);
+            if (sessionId != null) {
+                session.setSessionId(sessionId);
+            }
+        }
+        if (entryTime != null) {
+            session.setEntryTime(entryTime);
+        }
+        if (exitTime != null) {
+            session.setExitTime(exitTime);
+        }
+        if (durationSeconds > 0 && session.getEntryTime() == null && session.getExitTime() != null) {
+            session.setEntryTime(session.getExitTime().minusSeconds(durationSeconds));
+        }
+        if (areaId != null && session.getVehicle() != null) {
+            session.getVehicle().setCurrentAreaId(areaId);
+        }
+
+        Payment payment = new Payment(rs.getDouble("amount"), null, session);
+        payment.setPaymentId(rs.getString("payment_id"));
+        payment.setStatus(Payment.PaymentStatus.valueOf(rs.getString("status")));
+        if (rs.getString("transaction_id") != null) {
+            payment.setTransactionId(rs.getString("transaction_id"));
+        }
+        payment.setStoredEntryTime(entryTime);
+        payment.setStoredExitTime(exitTime);
+        payment.setStoredDurationSeconds(durationSeconds);
+        payment.setStoredSlotId(slotId);
+        payment.setStoredAreaId(areaId);
+        payment.setStoredLicensePlate(plateText);
+        try {
+            if (rs.getTimestamp("created_at") != null) {
+                payment.setPaymentTime(rs.getTimestamp("created_at").toLocalDateTime());
+            }
+        } catch (SQLException ignored) { }
+        return payment;
+    }
+
+    private boolean matchesPaymentPlate(Payment payment, String normalizedPlate) {
+        if (payment.getParkingSession() == null || payment.getParkingSession().getVehicle() == null) {
+            return false;
+        }
+        LicensePlate lp = payment.getParkingSession().getVehicle().getLicensePlate();
+        return normalizePlate(lp).equals(normalizedPlate);
+    }
+
+    private String normalizePlateString(String plate) {
+        if (plate == null) return "";
+        return plate.replaceAll("[^A-Za-z0-9]", "").toUpperCase();
     }
     
     public void close() {

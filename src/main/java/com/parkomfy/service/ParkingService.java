@@ -3,8 +3,8 @@ package com.parkomfy.service;
 import com.parkomfy.model.*;
 import com.parkomfy.repository.IParkingRepository;
 
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * ParkingService implements parking management operations
@@ -33,8 +33,10 @@ public class ParkingService implements IParkingService {
         
         slot.occupy(vehicle);
         ParkingSession session = new ParkingSession(vehicle, slot);
+        if (vehicle.getEntryTime() != null) {
+            session.setEntryTime(vehicle.getEntryTime());
+        }
         
-        // Save to repository
         if (repository != null) {
             repository.saveSession(session);
             repository.updateSlot(slot);
@@ -61,29 +63,122 @@ public class ParkingService implements IParkingService {
     
     @Override
     public Payment completeSession(ParkingSession session) {
-        if (!session.isActive()) {
-            throw new IllegalStateException("Session " + session.getSessionId() + " is not active");
+        if (session.getPayment() != null) {
+            return session.getPayment();
         }
-        
-        // Complete the session
+        if (repository != null) {
+            Payment existing = repository.getPaymentBySessionId(session.getSessionId());
+            if (existing != null) {
+                session.setPayment(existing);
+                return existing;
+            }
+        }
+        if (!session.isActiveOrLeaving()) {
+            throw new IllegalStateException("Session " + session.getSessionId() + " cannot be billed (status=" + session.getStatus() + ")");
+        }
+
+        alignSessionEntryWithGate(session);
         session.complete();
-        
-        // Calculate fee
-        ParkingArea area = findAreaForSlot(session.getParkingSlot());
-        PricingPolicy policy = area != null ? area.getPricingPolicy() : getDefaultPricingPolicy();
+
+        String areaId = session.getParkingSlot() != null
+            ? repository.getAreaIdForSlot(session.getParkingSlot().getSlotId())
+            : null;
+        if (areaId == null && session.getVehicle() != null) {
+            areaId = session.getVehicle().getCurrentAreaId();
+        }
+        PricingPolicy policy = getPricingPolicyForArea(areaId);
         double fee = calculateFee(session, policy);
-        
-        // Create payment
+
+        if (fee <= 0) {
+            if (repository != null) {
+                repository.updateSession(session);
+                if (session.getVehicle() != null && session.getVehicle().getExitTime() == null) {
+                    session.getVehicle().setExitTime(session.getExitTime());
+                    repository.saveVehicle(session.getVehicle());
+                }
+            }
+            return null;
+        }
+
+        if (repository != null && session.getVehicle() != null) {
+            String plate = normalizePlate(session);
+            Payment recent = repository.getLatestPaymentForPlate(plate);
+            if (isDuplicateRecentPayment(recent)) {
+                session.setPayment(recent);
+                return recent;
+            }
+        }
+
         Payment payment = new Payment(fee, null, session);
         session.setPayment(payment);
-        
-        // Save to repository
         if (repository != null) {
             repository.updateSession(session);
             repository.savePayment(payment);
+            if (session.getVehicle() != null && session.getVehicle().getExitTime() == null) {
+                session.getVehicle().setExitTime(session.getExitTime());
+                repository.saveVehicle(session.getVehicle());
+            }
         }
-        
         return payment;
+    }
+
+    @Override
+    public Payment billGateVisit(Vehicle vehicle, String areaId) {
+        if (vehicle == null || vehicle.getEntryTime() == null) {
+            throw new IllegalArgumentException("Vehicle entry time is required for billing");
+        }
+        if (repository != null && vehicle.getLicensePlate() != null) {
+            String plate = com.parkomfy.util.PlateMatcher.normalize(
+                vehicle.getLicensePlate().getPlateNumber());
+            Payment recent = repository.getLatestPaymentForPlate(plate);
+            if (isDuplicateRecentPayment(recent)) {
+                if (vehicle.getExitTime() == null) {
+                    vehicle.setExitTime(LocalDateTime.now());
+                    repository.saveVehicle(vehicle);
+                }
+                return recent;
+            }
+        }
+
+        LocalDateTime exitTime = LocalDateTime.now();
+        vehicle.setExitTime(exitTime);
+
+        ParkingSlot gateSlot = new ParkingSlot("GATE-" + (areaId != null ? areaId : "UNKNOWN"), 0, "G", 0);
+        ParkingSession session = new ParkingSession(vehicle, gateSlot);
+        session.setEntryTime(vehicle.getEntryTime());
+        session.setExitTime(exitTime);
+        session.setStatus(ParkingSession.SessionStatus.COMPLETED);
+
+        PricingPolicy policy = getPricingPolicyForArea(areaId);
+        double fee = calculateFee(session, policy);
+
+        if (fee <= 0) {
+            if (repository != null) {
+                repository.saveVehicle(vehicle);
+            }
+            return null;
+        }
+
+        Payment payment = new Payment(fee, null, session);
+        session.setPayment(payment);
+
+        if (repository != null) {
+            repository.saveSession(session);
+            repository.saveVehicle(vehicle);
+            repository.savePayment(payment);
+        }
+        return payment;
+    }
+
+    @Override
+    public PricingPolicy getPricingPolicyForArea(String areaId) {
+        if (areaId != null && repository != null) {
+            ParkingArea area = repository.getArea(areaId);
+            if (area != null && area.getPricingPolicy() != null) {
+                return area.getPricingPolicy();
+            }
+        }
+        return getDefaultPricingPolicy();
     }
     
     @Override
@@ -94,7 +189,6 @@ public class ParkingService implements IParkingService {
     
     @Override
     public ParkingArea getRealTimeStatus(ParkingArea area) {
-        // Refresh slot statuses from repository if needed
         if (repository != null) {
             List<ParkingSlot> slots = repository.getAllSlots(area.getAreaId());
             for (ParkingSlot slot : slots) {
@@ -107,14 +201,34 @@ public class ParkingService implements IParkingService {
         }
         return area;
     }
-    
-    private ParkingArea findAreaForSlot(ParkingSlot slot) {
-        // This would typically query the repository
-        // For now, return null (would need area reference)
-        return null;
+
+    private void alignSessionEntryWithGate(ParkingSession session) {
+        Vehicle vehicle = session.getVehicle();
+        if (vehicle == null || vehicle.getEntryTime() == null) {
+            return;
+        }
+        if (session.getEntryTime() == null || vehicle.getEntryTime().isBefore(session.getEntryTime())) {
+            session.setEntryTime(vehicle.getEntryTime());
+        }
     }
     
     private PricingPolicy getDefaultPricingPolicy() {
-        return new PricingPolicy("DEFAULT", 10.0); // 10 TRY per hour
+        return new PricingPolicy("DEFAULT", 20.0);
+    }
+
+    private boolean isDuplicateRecentPayment(Payment recent) {
+        if (recent == null || recent.getPaymentTime() == null) {
+            return false;
+        }
+        long seconds = java.time.Duration.between(recent.getPaymentTime(), LocalDateTime.now()).getSeconds();
+        return seconds >= 0 && seconds < 180;
+    }
+
+    private String normalizePlate(ParkingSession session) {
+        if (session.getVehicle() == null || session.getVehicle().getLicensePlate() == null) {
+            return "";
+        }
+        return com.parkomfy.util.PlateMatcher.normalize(
+            session.getVehicle().getLicensePlate().getPlateNumber());
     }
 }

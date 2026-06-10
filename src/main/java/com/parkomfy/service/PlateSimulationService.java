@@ -87,8 +87,12 @@ public class PlateSimulationService {
         if (vehicle == null) {
             vehicle = new Vehicle(new LicensePlate(normalized));
             vehicle.setEntryTime(LocalDateTime.now());
-            repository.saveVehicle(vehicle);
         }
+        User owner = repository.getUserByLicensePlate(normalized);
+        if (owner != null) {
+            vehicle.setUserId(owner.getUserId());
+        }
+        repository.saveVehicle(vehicle);
         return vehicle;
     }
 }

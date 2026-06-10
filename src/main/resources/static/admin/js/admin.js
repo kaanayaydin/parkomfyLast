@@ -24,12 +24,18 @@ async function ensureAdminLogin() {
   });
   const data = await res.json();
   if (data.success && data.data?.token) {
+    if (data.data.role && data.data.role.toUpperCase() !== 'ADMIN') {
+      alert('Bu hesap admin yetkisine sahip değil. admin / 1234 ile giriş yapın.');
+      return false;
+    }
     setAdminToken(data.data.token);
     return true;
   }
   alert(data.message || 'Admin girişi başarısız');
   return false;
 }
+const LIVE_SNAPSHOT_MS = 100;
+
 function snapshotUrlForLot(lotKey) {
   const lot = (lotKey || 'loop1').replace('.mp4', '');
   return `${SNAPSHOT_URL}?lot=${encodeURIComponent(lot)}`;
@@ -61,14 +67,33 @@ function toast(msg) {
   setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
 
-async function api(path, opts = {}) {
-  if (path.startsWith('/admin')) {
+function needsAdminAuth(path, method = 'GET') {
+  if (path.startsWith('/admin')) return true;
+  if (method === 'POST' && /^\/camera\/live\/(video|predict-slots|scan)/.test(path)) return true;
+  return false;
+}
+
+async function api(path, opts = {}, retried = false) {
+  const method = (opts.method || 'GET').toUpperCase();
+  if (needsAdminAuth(path, method)) {
     const ok = await ensureAdminLogin();
     if (!ok) throw new Error('Admin girişi gerekli');
     opts.headers = { ...(opts.headers || {}), 'X-Auth-Token': getAdminToken() };
   }
   const res = await fetch(`${API}${path}`, opts);
-  return res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = { success: false, message: `Sunucu yanıtı okunamadı (HTTP ${res.status})` };
+  }
+  if (needsAdminAuth(path, method) && (res.status === 401 || (data.message && data.message.includes('Yetkisiz')))) {
+    if (!retried) {
+      setAdminToken(null);
+      return api(path, opts, true);
+    }
+  }
+  return data;
 }
 
 function showView(name) {
@@ -91,7 +116,8 @@ function videoDisplayRect(wrapW, wrapH, imgW, imgH) {
 function startLiveVideo(elementId, lotKey) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  const urlBase = lotKey ? snapshotUrlForLot(lotKey) : SNAPSHOT_URL;
+  const resolvedLot = (lotKey || currentLotKey()).replace('.mp4', '');
+  const urlBase = snapshotUrlForLot(resolvedLot);
   const tick = () => {
     el.onload = () => {
       if (state.view === 'detail' && liveSlotsCache.length) drawLiveOverlay(liveSlotsCache);
@@ -100,7 +126,7 @@ function startLiveVideo(elementId, lotKey) {
   };
   tick();
   if (snapshotTimer) clearInterval(snapshotTimer);
-  snapshotTimer = setInterval(tick, 90);
+  snapshotTimer = setInterval(tick, LIVE_SNAPSHOT_MS);
 }
 
 function stopLiveVideo() {
@@ -132,13 +158,17 @@ async function loadVideoOptions() {
 
 async function onVideoChange(videoId) {
   if (!videoId) return;
-  const res = await fetch(`${API}/camera/live/video?video=${encodeURIComponent(videoId)}`, { method: 'POST' });
-  const data = await res.json();
+  // Detay/setup görünümünde global seçici önizlemeyi değiştirir; otopark lot'u aynı kalır.
+  if (state.view === 'detail' || (state.view === 'setup' && state.step === 2)) {
+    toast('Bu otoparkın kamerası değişmez — üst menü sadece önizleme içindir.');
+    const sel = document.getElementById('videoSelect');
+    if (sel && state.selectedArea?.lotKey) sel.value = state.selectedArea.lotKey.replace('.mp4', '');
+    return;
+  }
+  const data = await api(`/camera/live/video?video=${encodeURIComponent(videoId)}`, { method: 'POST' });
   if (data.success) {
     state.currentVideo = videoId.replace('.mp4', '');
     toast(`Kamera: ${data.current || videoId}`);
-    startLiveVideo('liveStream');
-    startLiveVideo('setupLiveStream');
     const sel = document.getElementById('videoSelect');
     if (sel) sel.value = state.currentVideo;
   } else {
@@ -179,7 +209,7 @@ async function loadAreas() {
     <div class="area-item">
       <div>
         <strong>${a.areaName}</strong> <span class="badge ${a.calibrated ? 'ok' : 'warn'}">${a.calibrated ? 'Kalibre' : 'Kalibre değil'}</span>
-        <div class="hint">${a.areaId} · ${a.slotCount} slot · ${videoLabel(a.lotKey)} · ${a.address || ''}</div>
+        <div class="hint">${a.areaId} · ${a.slotCount} slot · ${videoLabel(a.lotKey)} · ${a.hourlyRate != null ? a.hourlyRate + ' TL/saat' : ''} · ${a.address || ''}</div>
       </div>
       <div class="row">
         ${!a.calibrated ? `<button class="btn blue" onclick="startSetupFor('${a.areaId}')">Kalibre Et</button>` : ''}
@@ -235,23 +265,46 @@ function renderSetup() {
 }
 
 async function createArea() {
-  const name = document.getElementById('areaName').value.trim();
-  const address = document.getElementById('areaAddress').value.trim();
-  const lotKey = document.getElementById('areaVideo').value;
-  if (!name) { toast('Otopark adı gerekli'); return; }
-  if (!lotKey) { toast('Kamera videosu seçin'); return; }
-  const res = await api('/admin/parking-areas', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ areaName: name, address, lotKey }),
-  });
-  if (!res.success) { toast(res.message || 'Hata'); return; }
-  state.setup.areaId = res.data.areaId;
-  state.setup.lotKey = res.data.lotKey;
-  state.step = 2;
-  toast('Otopark oluşturuldu');
-  renderSetup();
-  startLiveVideo('setupLiveStream', res.data.lotKey);
+  try {
+    const name = document.getElementById('areaName').value.trim();
+    const address = document.getElementById('areaAddress').value.trim();
+    const description = document.getElementById('areaDescription')?.value.trim() || '';
+    const hourlyRate = parseFloat(document.getElementById('areaHourlyRate')?.value || '20');
+    const firstHourRaw = document.getElementById('areaFirstHourRate')?.value;
+    const firstHourRate = firstHourRaw ? parseFloat(firstHourRaw) : null;
+    const freeMinutes = parseInt(document.getElementById('areaFreeMinutes')?.value || '0', 10);
+    const maxDailyRaw = document.getElementById('areaMaxDailyRate')?.value;
+    const maxDailyRate = maxDailyRaw ? parseFloat(maxDailyRaw) : null;
+    const videoSel = document.getElementById('areaVideo');
+    const lotKey = videoSel?.value;
+    const selectedOpt = videoSel?.options[videoSel.selectedIndex];
+    if (!name) { toast('Otopark adı gerekli'); return; }
+    if (!lotKey || selectedOpt?.disabled) {
+      toast('Kullanılabilir kamera videosu yok — tüm videolar kullanımda veya seçim yapın');
+      return;
+    }
+    if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) { toast('Geçerli saatlik ücret girin'); return; }
+    const body = { areaName: name, address, lotKey, description, hourlyRate, freeMinutes };
+    if (firstHourRate != null && firstHourRate > 0) body.firstHourRate = firstHourRate;
+    if (maxDailyRate != null && maxDailyRate > 0) body.maxDailyRate = maxDailyRate;
+    toast('Kaydediliyor…');
+    const res = await api('/admin/parking-areas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.success) { toast(res.message || 'Otopark oluşturulamadı'); return; }
+    state.setup.areaId = res.data.areaId;
+    state.setup.lotKey = res.data.lotKey;
+    state.step = 2;
+    toast('Otopark oluşturuldu');
+    await loadAreas();
+    renderSetup();
+    startLiveVideo('setupLiveStream', res.data.lotKey);
+  } catch (e) {
+    toast(e.message || 'Otopark oluşturulamadı');
+    console.error('createArea', e);
+  }
 }
 
 async function resetAllParking() {

@@ -1,9 +1,17 @@
 """
-Hibrit doluluk: admin kalibrasyon poligonları (sabit) + yolov8n araç tespiti.
-Araç alt-orta noktası (cx, y2) poligon içinde mi? — parkomfy-backend ile aynı mantık.
-Custom Bos/Dolu modeli doluluk için KULLANILMAZ (düşük accuracy).
+Hibrit doluluk: admin kalibrasyon poligonu + model tespiti (poligon icinde mi?).
+
+yolov8n:  arac kutusu alt-orta noktasi admin poligonunda -> DOLU
+best.pt:    Bos/Dolu kutusu alt-orta noktasi admin poligonunda -> BOS/DOLU
+            (eslesme yoksa IoU, o da yoksa yolov8n yedek)
+
+best.pt yuklu degilse dogrudan yolov8n kullanilir.
 """
+import hashlib
 import logging
+import os
+import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -34,12 +42,67 @@ def _quad_bbox_norm(corners):
     return min_x, min_y, max_x - min_x, max_y - min_y
 
 
-def analyze_calibrated_area(image_bytes, area_id):
+def _model_label():
+    path = slot_model.get_model_path()
+    if path and os.path.isfile(path):
+        return Path(path).name
+    return "best.pt"
+
+
+def _analyze_yolov8n(quads_norm, bgr, w, h):
+    """Fallback: yolov8n araç merkezi poligon içinde mi."""
+    detections = cv_engine.detect_vehicles_yolo(bgr)
+    out = []
+    for corners_norm in quads_norm:
+        poly_px = [
+            (int(corners_norm[i][0] * w), int(corners_norm[i][1] * h))
+            for i in range(4)
+        ]
+        occupied, det = cv_engine.slot_occupied_by_point_polygon(poly_px, detections)
+        conf = float(det["confidence"]) if det else 0.0
+        vx, vy, vw, vh = _norm_bbox_from_det(det, w, h)
+        out.append({
+            "occupied": bool(occupied),
+            "confidence": conf if occupied else 0.0,
+            "vehicle_x": vx,
+            "vehicle_y": vy,
+            "vehicle_width": vw,
+            "vehicle_height": vh,
+        })
+    return out
+
+
+_OCC_CACHE = {}
+_CACHE_TTL_SEC = float(os.environ.get("PARKOMFY_OCC_CACHE_SEC", "1.5"))
+
+
+def _frame_signature(image_bytes):
+    if not image_bytes:
+        return "empty"
+    head = image_bytes[:1024]
+    tail = image_bytes[-1024:] if len(image_bytes) > 1024 else b""
+    return hashlib.md5(head + tail + str(len(image_bytes)).encode()).hexdigest()
+
+
+def analyze_calibrated_area(image_bytes, area_id, use_cache=True):
     """
     Returns list of dicts sorted by slot_number:
       slot_number, corners (norm), occupied, confidence,
       vehicle_x/y/width/height (norm bbox of matched vehicle)
     """
+    if use_cache and image_bytes:
+        sig = _frame_signature(image_bytes)
+        now = time.time()
+        cached = _OCC_CACHE.get(area_id)
+        if cached and now - cached[0] < _CACHE_TTL_SEC and cached[1] == sig:
+            return cached[2]
+        results = _analyze_calibrated_area_impl(image_bytes, area_id)
+        _OCC_CACHE[area_id] = (now, sig, results)
+        return results
+    return _analyze_calibrated_area_impl(image_bytes, area_id)
+
+
+def _analyze_calibrated_area_impl(image_bytes, area_id):
     calib = slot_model.load_calibration(area_id)
     if not calib:
         return []
@@ -48,37 +111,46 @@ def analyze_calibrated_area(image_bytes, area_id):
     if bgr is None:
         return []
 
-    detections = cv_engine.detect_vehicles_yolo(bgr)
     slots_cfg = sorted(calib.get("slots") or [], key=lambda s: int(s.get("slot_number", 0)))
-
-    results = []
+    quads_norm = []
+    slot_numbers = []
     for slot_entry in slots_cfg:
         corners = slot_entry.get("corners") or []
         if len(corners) != 4:
             continue
-        slot_number = int(slot_entry.get("slot_number", len(results) + 1))
-        corners_norm = [(float(c[0]), float(c[1])) for c in corners]
-        poly_px = [
-            (int(corners_norm[i][0] * w), int(corners_norm[i][1] * h))
-            for i in range(4)
-        ]
-        occupied, det = cv_engine.slot_occupied_by_point_polygon(poly_px, detections)
-        conf = float(det["confidence"]) if det else 0.0
-        vx, vy, vw, vh = _norm_bbox_from_det(det, w, h)
+        slot_numbers.append(int(slot_entry.get("slot_number", len(slot_numbers) + 1)))
+        quads_norm.append([(float(c[0]), float(c[1])) for c in corners])
+
+    if not quads_norm:
+        return []
+
+    use_custom = slot_model._load_slot_model() is not None
+    if use_custom:
+        occ_items = slot_model.check_occupancy_with_model(image_bytes, quads_norm)
+        engine = _model_label()
+    else:
+        occ_items = _analyze_yolov8n(quads_norm, bgr, w, h)
+        engine = "yolov8n"
+
+    results = []
+    for idx, corners_norm in enumerate(quads_norm):
+        occ_data = occ_items[idx] if idx < len(occ_items) else {}
+        occupied = bool(occ_data.get("occupied", False))
+        conf = float(occ_data.get("confidence", 0.0)) if occupied else 0.0
         x, y, bw, bh = _quad_bbox_norm(corners_norm)
         results.append({
-            "slot_number": slot_number,
+            "slot_number": slot_numbers[idx],
             "corners": corners_norm,
             "x": x,
             "y": y,
             "width": bw,
             "height": bh,
-            "occupied": bool(occupied),
-            "confidence": conf if occupied else 0.0,
-            "vehicle_x": vx,
-            "vehicle_y": vy,
-            "vehicle_width": vw,
-            "vehicle_height": vh,
+            "occupied": occupied,
+            "confidence": conf,
+            "vehicle_x": float(occ_data.get("vehicle_x", 0.0)),
+            "vehicle_y": float(occ_data.get("vehicle_y", 0.0)),
+            "vehicle_width": float(occ_data.get("vehicle_width", 0.0)),
+            "vehicle_height": float(occ_data.get("vehicle_height", 0.0)),
         })
 
     dolu = sum(1 for r in results if r["occupied"])
@@ -86,8 +158,8 @@ def analyze_calibrated_area(image_bytes, area_id):
         f"S{r['slot_number']}:{'DOLU' if r['occupied'] else 'BOS'}" for r in results
     )
     logger.info(
-        "Hybrid [%s]: %s slot, %s dolu (yolov8n+poligon) [%s]",
-        area_id, len(results), dolu, slot_bits,
+        "Hybrid [%s]: %s slot, %s dolu (%s+kalibrasyon) [%s]",
+        area_id, len(results), dolu, engine, slot_bits,
     )
     return results
 

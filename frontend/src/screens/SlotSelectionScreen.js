@@ -14,6 +14,7 @@ import {
   startOfToday,
   applyDatePart,
   applyTimePart,
+  calculateParkingFee,
 } from '../config/api';
 
 const PICKER_META = {
@@ -66,12 +67,19 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
   const endTime = useMemo(() => buildDateTimeFromDate(endAt), [endAt]);
   const isValidRange = endAt.getTime() > startAt.getTime();
 
-  const unitPrice = selectedParking?.price || 20;
-  const durationHours = useMemo(() => {
-    const diff = (endAt.getTime() - startAt.getTime()) / (1000 * 60 * 60);
-    return Math.max(1, Math.ceil(diff));
-  }, [startAt, endAt]);
-  const totalFee = durationHours * unitPrice;
+  const unitPrice = selectedParking?.hourlyRate ?? selectedParking?.price ?? 20;
+  const durationMinutes = useMemo(
+    () => Math.max(0, Math.ceil((endAt.getTime() - startAt.getTime()) / (1000 * 60))),
+    [startAt, endAt],
+  );
+  const durationHours = useMemo(
+    () => Math.max(1, Math.ceil(durationMinutes / 60)),
+    [durationMinutes],
+  );
+  const totalFee = useMemo(
+    () => calculateParkingFee(durationMinutes, selectedParking),
+    [durationMinutes, selectedParking],
+  );
 
   const pickerConfig = useMemo(() => {
     if (!activePicker) return null;
@@ -140,7 +148,9 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
     return () => { cancelled = true; };
   }, [areaId, startTime, endTime, timelineStart, timelineEnd, isValidRange]);
 
-  const resolveSlotId = (slot) => slot.slotId || null;
+  const resolveSlotId = (slot) =>
+    slot.slotId
+    || (selectedParking?.lotKey ? `SLOT-${selectedParking.lotKey}-${slot.id}` : null);
 
   const selectedView = selectedSlot
     ? slotViews[selectedParking?.slots?.find((s) => s.id === selectedSlot)?.slotId]

@@ -12,6 +12,7 @@ public class ParkingArea {
     private String areaId;
     private String areaName;
     private String address;
+    private String description;
     private List<ParkingSlot> parkingSlots;
     private List<Camera> cameras;
     private PricingPolicy pricingPolicy;
@@ -44,6 +45,14 @@ public class ParkingArea {
     
     public void setAddress(String address) {
         this.address = address;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
     
     public List<ParkingSlot> getParkingSlots() {

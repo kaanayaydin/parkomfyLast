@@ -7,7 +7,7 @@ Amaç: Bu projede agent tarafından yapılan tüm değişikliklerin kronolojik k
 Not: Her yeni güncellemede bu dosyanın sonuna veya ilgili bölüme ekleme yapılır.
       (Kaan için benzer dosya: kaan_journal.txt — Kaan'ın agent'ı tutacak.)
 
-Son güncelleme: 2026-06-09
+Son güncelleme: 2026-06-10
 ================================================================================
 
 
@@ -250,5 +250,14 @@ GÜNCELLEME LOGU (kısa satırlar — yeni işler buraya eklenir)
 2026-06-09 | Fix: canlı dolu slot rezerve edilemez; rezerve saatler çizelgede LIVE_RESERVED ile görünür; dolu slot seçilebilir (sadece görüntüleme).
 2026-06-09 | Git push: develop-eren (31d4577) rezervasyon timeline.
 2026-06-09 | Merge origin/kaan-dev → develop-eren: PaddleOCR, giriş/çıkış kameraları, AdminAuthFilter, benchmark/eval, kaan_journal.txt.
+2026-06-10 | Mobil Rezervasyonlarım: Aktif / Geçmiş / İptal sekmeleri.
+2026-06-08 | Rezervasyonsuz park: giriş→çıkış otomatik ücret + PENDING ödeme (payments tablosu); kayıtlı plaka→user_id eşlemesi; admin otopark kaydında saatlik ücret, ilk saat, ücretsiz dk, günlük max.
+2026-06-08 | Mobil Ödemelerim sekmesi: GET /payments?licensePlate=, süre (sn), giriş-çıkış, tutar; mahmut/34 PGZ 545 plaka eşlemesi.
+2026-06-10 | best.pt: yolov8n ile ayni poligon mantigi (alt-orta nokta); IoU + yolov8n yedek.
+2026-06-10 | 10 iyilestirme: auth token (odeme/rezervasyon), exit NPE, WS loop, slotId, DetectBatch, kamera auth, fetchJson, rezervasyon validasyon, vehicleType, occ cache.
+2026-06-10 | ScheduledLoop1Simulator: loop1 basi=giris, sonu=cikis, son kare 30sn don, dongu; gate watcher kaldirildi.
+2026-06-10 | OccupancySyncService: watchGateExitComplete; doluluk tabanli cikis tetigi kaldirildi.
+2026-06-10 | Admin/mobil kamera senkronu: LIVE_CAMERA_POLL_MS=100, currentLotKey(), timeline header, CameraFrame Java.
+2026-06-10 | CS402_SON_RAPOR.md — son teslim raporu olusturuldu.
 
 ================================================================================

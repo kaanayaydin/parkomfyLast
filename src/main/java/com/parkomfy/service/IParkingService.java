@@ -31,9 +31,19 @@ public interface IParkingService {
     ParkingSession getSession(String sessionId);
     
     /**
-     * Complete a parking session and calculate fee
+     * Complete an active/leaving session and create a pending payment (walk-in or manual exit).
      */
     Payment completeSession(ParkingSession session);
+
+    /**
+     * Bill a gate visit when no slot session exists (entered but never matched to a slot).
+     */
+    Payment billGateVisit(Vehicle vehicle, String areaId);
+    
+    /**
+     * Resolve pricing policy for a parking area.
+     */
+    PricingPolicy getPricingPolicyForArea(String areaId);
     
     /**
      * Calculate parking fee based on duration

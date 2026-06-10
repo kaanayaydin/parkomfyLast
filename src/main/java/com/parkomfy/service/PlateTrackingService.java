@@ -27,6 +27,7 @@ public class PlateTrackingService {
     private static final double MIN_DETECTION_CONFIDENCE = 0.5;
 
     private final IParkingRepository repository;
+    private final IParkingService parkingService;
     private final IDetectionService detectionService;
     private final IYOLOInference yoloInference;
     private final LiveParkingService liveParkingService;
@@ -34,12 +35,14 @@ public class PlateTrackingService {
     private final NotificationService notificationService;
 
     public PlateTrackingService(IParkingRepository repository,
+                                IParkingService parkingService,
                                 IDetectionService detectionService,
                                 IYOLOInference yoloInference,
                                 LiveParkingService liveParkingService,
                                 ParkingEventBroadcaster broadcaster,
                                 NotificationService notificationService) {
         this.repository = repository;
+        this.parkingService = parkingService;
         this.detectionService = detectionService;
         this.yoloInference = yoloInference;
         this.liveParkingService = liveParkingService;
@@ -66,20 +69,30 @@ public class PlateTrackingService {
         dto.setConfidence(result.getConfidence());
 
         LicensePlate lp = new LicensePlate(normalized);
+        LocalDateTime now = LocalDateTime.now();
+        User registeredUser = repository.getUserByLicensePlate(normalized);
+
         Vehicle vehicle = repository.getVehicleByPlate(lp);
         if (vehicle == null) {
             vehicle = new Vehicle(lp);
-            repository.saveVehicle(vehicle);
+        } else {
+            vehicle.setEntryTime(now);
+            vehicle.setExitTime(null);
         }
+        if (registeredUser != null) {
+            vehicle.setUserId(registeredUser.getUserId());
+        }
+        repository.saveVehicle(vehicle);
         dto.setVehicleId(vehicle.getVehicleId());
 
-        LocalDateTime now = LocalDateTime.now();
         SlotReservation activeRes = repository.getActiveReservationByPlate(normalized, now);
         if (activeRes != null) {
             dto.setHasReservation(true);
             dto.setReservedSlotId(activeRes.getSlotId());
             dto.setReservationId(activeRes.getReservationId());
             dto.setAreaId(activeRes.getAreaId());
+            vehicle.setCurrentAreaId(activeRes.getAreaId());
+            repository.saveVehicle(vehicle);
             activeRes.setStatus(SlotReservation.ReservationStatus.ACTIVE);
             repository.updateReservation(activeRes);
         }
@@ -160,7 +173,10 @@ public class PlateTrackingService {
             if (existing == null) {
                 dbSlot.occupy(matchedVehicle);
                 ParkingSession session = new ParkingSession(matchedVehicle, dbSlot);
+                session.setEntryTime(matchedVehicle.getEntryTime());
+                matchedVehicle.setCurrentAreaId(areaId);
                 repository.saveSession(session);
+                repository.saveVehicle(matchedVehicle);
                 repository.updateSlot(dbSlot);
                 match.setSessionId(session.getSessionId());
                 notificationService.notifyVehicleParked(
@@ -285,13 +301,18 @@ public class PlateTrackingService {
             }
         }
         if (session == null) {
-            return dto;
+            return billGateExit(plate, normalized, dto);
         }
 
-        session.complete();
-        repository.updateSession(session);
+        Payment payment = null;
+        try {
+            payment = parkingService.completeSession(session);
+        } catch (IllegalStateException e) {
+            System.err.println("Exit billing failed: " + e.getMessage());
+        }
+
         Vehicle vehicle = session.getVehicle();
-        if (vehicle != null) {
+        if (vehicle != null && vehicle.getExitTime() == null) {
             vehicle.setExitTime(LocalDateTime.now());
             repository.saveVehicle(vehicle);
         }
@@ -299,15 +320,57 @@ public class PlateTrackingService {
         dto.setSessionId(session.getSessionId());
         dto.setSlotId(session.getParkingSlot() != null ? session.getParkingSlot().getSlotId() : null);
         dto.setExited(true);
+        if (payment != null) {
+            fillExitPaymentDto(dto, payment, vehicle, plate);
+        } else {
+            notificationService.sendToPlate(plate, "Çıkış onaylandı", "İyi yolculuklar!");
+        }
+        return dto;
+    }
 
+    private ExitPlateResultDto billGateExit(String plate, String normalized, ExitPlateResultDto dto) {
+        Vehicle openVehicle = repository.getOpenVehicleByPlate(normalized);
+        if (openVehicle == null) {
+            return dto;
+        }
+        String areaId = openVehicle.getCurrentAreaId();
+        if (areaId == null) {
+            var areas = repository.getAllAreas();
+            if (!areas.isEmpty()) {
+                areaId = areas.get(0).getAreaId();
+            }
+        }
+        Payment payment = parkingService.billGateVisit(openVehicle, areaId);
+        dto.setExited(true);
+        if (payment != null) {
+            fillExitPaymentDto(dto, payment, openVehicle, plate);
+        }
+        return dto;
+    }
+
+    private void fillExitPaymentDto(ExitPlateResultDto dto, Payment payment, Vehicle vehicle, String plate) {
+        if (payment != null) {
+            dto.setPaymentId(payment.getPaymentId());
+            dto.setFeeAmount(payment.getAmount());
+            if (payment.getParkingSession() != null) {
+                dto.setDurationMinutes(payment.getParkingSession().getDurationMinutes());
+            }
+            if (vehicle != null) {
+                dto.setUserId(vehicle.getUserId());
+            }
+            notificationService.sendToPlate(plate,
+                "Park ücreti",
+                String.format("%.2f TL — girişten çıkışa otomatik hesaplandı. Ödeme bekliyor.", payment.getAmount()));
+        }
         notificationService.sendToPlate(plate, "Çıkış onaylandı", "İyi yolculuklar!");
         LiveParkingStatusDto live = liveParkingService.getLiveStatus(
-            session.getParkingSlot() != null ? resolveAreaFromSlot(session.getParkingSlot().getSlotId()) : null,
+            payment != null && payment.getParkingSession() != null && payment.getParkingSession().getParkingSlot() != null
+                ? resolveAreaFromSlot(payment.getParkingSession().getParkingSlot().getSlotId())
+                : (vehicle != null ? vehicle.getCurrentAreaId() : null),
             null, null);
         if (live != null) {
             broadcaster.broadcastLiveStatus(live);
         }
-        return dto;
     }
 
     private String resolveAreaFromSlot(String slotId) {

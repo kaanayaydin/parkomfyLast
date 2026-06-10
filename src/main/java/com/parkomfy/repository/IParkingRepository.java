@@ -45,8 +45,18 @@ public interface IParkingRepository {
     void savePayment(Payment payment);
     void updatePayment(Payment payment);
     Payment getPayment(String paymentId);
+    List<Payment> getPendingPaymentsByPlate(String normalizedPlate);
+    List<Payment> getPendingPaymentsByUserId(String userId);
+    List<Payment> getPaymentsByPlate(String normalizedPlate);
+    Payment getPaymentBySessionId(String sessionId);
+    Payment getLatestPaymentForPlate(String normalizedPlate);
     
-    // Detection Result operations
+    // User lookup
+    User getUserByLicensePlate(String normalizedPlate);
+    String getAreaIdForSlot(String slotId);
+    
+    // Vehicle helpers
+    Vehicle getOpenVehicleByPlate(String normalizedPlate);
     void saveDetectionResult(DetectionResult result);
     List<DetectionResult> getDetectionResults(String slotId);
     

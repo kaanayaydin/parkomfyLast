@@ -13,6 +13,7 @@ public class Vehicle {
     private LocalDateTime exitTime;
     private VehicleType vehicleType;
     private String userId; // Link to user account
+    private String currentAreaId; // Otopark alanı (giriş / park taraması)
     
     public Vehicle(LicensePlate licensePlate) {
         this.vehicleId = generateVehicleId();
@@ -79,6 +80,14 @@ public class Vehicle {
     
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public String getCurrentAreaId() {
+        return currentAreaId;
+    }
+
+    public void setCurrentAreaId(String currentAreaId) {
+        this.currentAreaId = currentAreaId;
     }
     
     public long getParkingDurationMinutes() {

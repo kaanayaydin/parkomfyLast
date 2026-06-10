@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Image } from 'react-native';
-import { getLiveCameraSnapshotUrl, getLiveCameraStatus } from '../config/api';
+import { getLiveCameraSnapshotUrl, getLiveCameraStatus, LIVE_CAMERA_POLL_MS } from '../config/api';
 
 /**
  * Canlı kamera: sunucudan snapshot polling.
@@ -10,7 +10,7 @@ import { getLiveCameraSnapshotUrl, getLiveCameraStatus } from '../config/api';
  * bir sonraki istek, onceki kare yuklendikten intervalMs sonra atilir -> istek
  * yigilmaz, cihaz hizina gore akar.
  */
-const LiveCameraView = ({ height = 220, label, lotKey = 'loop1', intervalMs = 350 }) => {
+const LiveCameraView = ({ height = 220, label, lotKey = 'loop1', intervalMs = LIVE_CAMERA_POLL_MS }) => {
   const displayLabel = label || `Canlı Kamera (${lotKey})`;
   const [baseUri, setBaseUri] = useState(null); // ekranda kalan son kare
   const [topUri, setTopUri] = useState(null); // arka planda yuklenen yeni kare

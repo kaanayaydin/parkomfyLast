@@ -230,30 +230,43 @@ public class DatabaseManager implements IParkingRepository {
     }
 
     private void seedDemoAreas() {
-        // MySQL yokken veriler bellekte tutulur ve her restart'ta silinir.
-        // Eren'in kalibrasyonu (grpc_server/calibrations/AREA-004.json) burada
-        // tohumlanir: loop1 videosu, videodaki 3 slot (poligon koseleriyle).
-        // Boylece restart sonrasi otopark eski haliyle geri gelir.
-        // MySQL acilirsa (ensureConnection) bu calismaz, gercek DB kullanilir.
-        ParkingArea area = new ParkingArea("AREA-004", "Otopark", "Özyeğin Üniversitesi");
-        double[][][] slotCorners = {
+        // MySQL yokken: yen1..yen5 otoparklari (grpc_server/calibrations/AREA-001.json).
+        String[][] defs = {
+            {"AREA-001", "Otopark 1", "yen1"},
+            {"AREA-002", "Otopark 2", "yen2"},
+            {"AREA-003", "Otopark 3", "yen3"},
+            {"AREA-004", "Otopark 4", "yen4"},
+            {"AREA-005", "Otopark 5", "yen5"},
+        };
+        double[][][] yen1Corners = {
             {{0.662, 0.408}, {0.848, 0.485}, {0.782, 0.834}, {0.475, 0.769}},
             {{0.465, 0.462}, {0.618, 0.515}, {0.402, 0.781}, {0.222, 0.692}},
             {{0.268, 0.414}, {0.448, 0.438}, {0.185, 0.71}, {0.025, 0.615}},
         };
-        for (int i = 0; i < slotCorners.length; i++) {
-            ParkingSlot slot = new ParkingSlot("SLOT-loop1-" + (i + 1), 0, "A", i + 1);
-            double[][] c = slotCorners[i];
-            slot.setC1x(c[0][0]); slot.setC1y(c[0][1]);
-            slot.setC2x(c[1][0]); slot.setC2y(c[1][1]);
-            slot.setC3x(c[2][0]); slot.setC3y(c[2][1]);
-            slot.setC4x(c[3][0]); slot.setC4y(c[3][1]);
-            area.addParkingSlot(slot);
+        for (String[] def : defs) {
+            String areaId = def[0];
+            String lotKey = def[2];
+            ParkingArea area = new ParkingArea(areaId, def[1], "Özyeğin Üniversitesi");
+            if ("yen1".equals(lotKey)) {
+                for (int i = 0; i < yen1Corners.length; i++) {
+                    ParkingSlot slot = new ParkingSlot("SLOT-yen1-" + (i + 1), 0, "A", i + 1);
+                    double[][] c = yen1Corners[i];
+                    slot.setC1x(c[0][0]); slot.setC1y(c[0][1]);
+                    slot.setC2x(c[1][0]); slot.setC2y(c[1][1]);
+                    slot.setC3x(c[2][0]); slot.setC3y(c[2][1]);
+                    slot.setC4x(c[3][0]); slot.setC4y(c[3][1]);
+                    area.addParkingSlot(slot);
+                }
+                demoCalibrated.put(areaId, true);
+            } else {
+                for (int i = 1; i <= 3; i++) {
+                    area.addParkingSlot(new ParkingSlot("SLOT-" + lotKey + "-" + i, 0, "A", i));
+                }
+            }
+            area.setPricingPolicy(new PricingPolicy(areaId, 20.0));
+            demoAreas.put(areaId, area);
+            demoLotKeys.put(areaId, lotKey);
         }
-        demoAreas.put("AREA-004", area);
-        area.setPricingPolicy(new PricingPolicy("AREA-004", 20.0));
-        demoLotKeys.put("AREA-004", "loop1");
-        demoCalibrated.put("AREA-004", true);
     }
 
     private ParkingArea buildDemoArea(String areaId, String areaName, String lotKey, int slotCount, int occupiedCount) {
@@ -327,7 +340,7 @@ public class DatabaseManager implements IParkingRepository {
         } catch (SQLException e) {
             System.err.println("nextAreaId failed: " + e.getMessage());
         }
-        return "AREA-004";
+        return "AREA-001";
     }
 
     @Override
@@ -1599,7 +1612,12 @@ public class DatabaseManager implements IParkingRepository {
 
     private String resolveAreaIdFromSlotId(String slotId) {
         if (slotId == null) return null;
-        if (slotId.contains("loop1")) return "AREA-004";
+        if (slotId.contains("yen1")) return "AREA-001";
+        if (slotId.contains("yen2")) return "AREA-002";
+        if (slotId.contains("yen3")) return "AREA-003";
+        if (slotId.contains("yen4")) return "AREA-004";
+        if (slotId.contains("yen5")) return "AREA-005";
+        if (slotId.contains("loop1")) return "AREA-001";
         if (slotId.contains("istasyon1")) return "AREA-001";
         if (slotId.contains("istasyon2")) return "AREA-002";
         if (slotId.contains("istasyon3")) return "AREA-003";

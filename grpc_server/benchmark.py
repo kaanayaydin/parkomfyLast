@@ -11,7 +11,7 @@ mean/median/p95/min/max ve FPS (1000/mean) raporlar.
 
 Kullanim:
   python benchmark.py
-  python benchmark.py --ocr-video ../otopark_giris_video.mp4 --slot-video ../loop1.mp4 -n 30
+  python benchmark.py --ocr-video ../giris.mp4 --slot-video ../yen1.mp4 -n 30
   python benchmark.py --area AREA-004 --warmup 2
 """
 import argparse
@@ -122,7 +122,7 @@ def bench_slots(video_path: Path, area_id: str, n: int, warmup: int):
 def main():
     ap = argparse.ArgumentParser(description="PARKOMFY latency/FPS benchmark")
     ap.add_argument("--ocr-video", default=str(_ROOT / "otopark_giris_video.mp4"))
-    ap.add_argument("--slot-video", default=str(_ROOT / "loop1.mp4"))
+    ap.add_argument("--slot-video", default=str(_ROOT / "yen1.mp4"))
     ap.add_argument("--area", default="AREA-004")
     ap.add_argument("-n", "--num", type=int, default=30, help="olculecek kare sayisi")
     ap.add_argument("--warmup", type=int, default=2, help="model isinma kare sayisi (raporlanmaz)")

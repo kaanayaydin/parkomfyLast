@@ -14,11 +14,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Proxies frames from Python camera simulator (loop1/2/3.mp4) on localhost:50052.
+ * Proxies frames from Python camera simulator (yen1..yen5.mp4) on localhost:50052.
  */
 public class CameraSimulationService {
 
     private static final String CAMERA_BASE = "http://127.0.0.1:50052";
+    public static final String PRIMARY_GATE_LOT = "yen1";
     private final ObjectMapper mapper = new ObjectMapper();
 
     public byte[] getLiveSnapshot() {
@@ -26,7 +27,7 @@ public class CameraSimulationService {
         return frame != null ? frame.jpeg : null;
     }
 
-    /** lotKey: loop1, loop2, loop3 — her otopark kendi paralel stream'inden. */
+    /** lotKey: yen1 .. yen5 — her otopark kendi paralel stream'inden. */
     public byte[] getLiveSnapshotForLot(String lotKey) {
         CameraFrame frame = fetchLiveSnapshot(lotKey);
         return frame != null ? frame.jpeg : null;
@@ -92,23 +93,28 @@ public class CameraSimulationService {
 
     private static String normalizeLotKey(String lotKey) {
         if (lotKey == null || lotKey.isBlank()) {
-            return "loop1";
+            return PRIMARY_GATE_LOT;
         }
         String k = lotKey.trim().toLowerCase().replace(".mp4", "");
-        // Entry/exit annotated cameras pass through unchanged.
         if (k.equals("giris") || k.equals("entry")) {
             return "giris";
         }
         if (k.equals("cikis") || k.equals("exit")) {
             return "cikis";
         }
+        if (k.startsWith("yen")) {
+            return k;
+        }
+        if (k.startsWith("loop") && k.length() > 4 && Character.isDigit(k.charAt(4))) {
+            return "yen" + k.substring(4);
+        }
         if (k.startsWith("istasyon")) {
             String n = k.replace("istasyon", "");
             if (!n.isBlank()) {
-                return "loop" + n;
+                return "yen" + n;
             }
         }
-        return k.startsWith("loop") ? k : "loop" + k;
+        return k.startsWith("yen") ? k : PRIMARY_GATE_LOT;
     }
 
     public boolean isCameraAvailable() {
@@ -130,18 +136,18 @@ public class CameraSimulationService {
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(2000);
             if (conn.getResponseCode() != 200) {
-                return "loop1.mp4";
+                return "yen1.mp4";
             }
             JsonNode node = mapper.readTree(conn.getInputStream());
-            return node.path("video").asText("loop1.mp4");
+            return node.path("video").asText("yen1.mp4");
         } catch (Exception e) {
-            return "loop1.mp4";
+            return "yen1.mp4";
         }
     }
 
     public List<Map<String, String>> listAvailableVideos() {
         List<Map<String, String>> fallback = new ArrayList<>();
-        for (String id : new String[]{"loop1", "loop2", "loop3"}) {
+        for (String id : new String[]{"yen1", "yen2", "yen3", "yen4", "yen5"}) {
             Map<String, String> m = new LinkedHashMap<>();
             m.put("id", id);
             m.put("name", id + ".mp4");

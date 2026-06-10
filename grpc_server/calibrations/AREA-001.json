@@ -1,18 +1,18 @@
 {
-  "area_id" : "AREA-004",
+  "area_id" : "AREA-001",
   "image_width" : 848,
   "image_height" : 478,
   "slots" : [ {
     "slot_number" : 1,
-    "slot_id" : "SLOT-loop1-1",
+    "slot_id" : "SLOT-yen1-1",
     "corners" : [ [ 0.297, 0.414 ], [ 0.473, 0.432 ], [ 0.237, 0.609 ], [ 0.073, 0.533 ] ]
   }, {
     "slot_number" : 2,
-    "slot_id" : "SLOT-loop1-2",
+    "slot_id" : "SLOT-yen1-2",
     "corners" : [ [ 0.487, 0.414 ], [ 0.643, 0.444 ], [ 0.437, 0.716 ], [ 0.23, 0.604 ] ]
   }, {
     "slot_number" : 3,
-    "slot_id" : "SLOT-loop1-3",
+    "slot_id" : "SLOT-yen1-3",
     "corners" : [ [ 0.6616666666666667, 0.435 ], [ 0.843, 0.45 ], [ 0.773, 0.793 ], [ 0.42, 0.728 ] ]
   } ]
 }

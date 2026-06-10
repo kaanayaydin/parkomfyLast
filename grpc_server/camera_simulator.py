@@ -1,8 +1,8 @@
 """
-3 otopark videosu (loop1/2/3.mp4) eşzamanlı döngü — her lot_key ayrı stream.
+5 otopark videosu (yen1..yen5.mp4) eşzamanlı döngü — her lot_key ayrı stream.
 HTTP: 127.0.0.1:50052
-  GET  /snapshot/{lot}.jpg   — lot: loop1, loop2, loop3
-  GET  /snapshot.jpg?lot=loop1
+  GET  /snapshot/{lot}.jpg   — lot: yen1 .. yen5, giris, cikis
+  GET  /snapshot.jpg?lot=yen1
   GET  /streams              — tüm kameraların durumu
   POST /switch               — admin önizleme (tek stream değil, preview lot)
 """
@@ -22,15 +22,11 @@ logger = logging.getLogger(__name__)
 
 HTTP_PORT = int(os.environ.get("PARKOMFY_CAMERA_HTTP_PORT", "50052"))
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_LOTS = ("loop1", "loop2", "loop3")
-
-# Entry/exit: plakaokuma.mp4 — loop1 video başı/sonu ile tetiklenir (ScheduledLoop1Simulator).
-_GIRIS_VIDEO = "plakaokuma.mp4"
-_CIKIS_VIDEO = "plakaokuma.mp4"
-_SPECIAL_VIDEOS = {"giris": _GIRIS_VIDEO, "cikis": _CIKIS_VIDEO}
-_LOOP1_FREEZE_SEC = float(os.environ.get("PARKOMFY_LOOP1_FREEZE_SEC", "30"))
+_DEFAULT_LOTS = ("yen1", "yen2", "yen3", "yen4", "yen5")
+_GATE_LOT = os.environ.get("PARKOMFY_GATE_LOT", "yen1")
+_GATE_FREEZE_SEC = float(os.environ.get("PARKOMFY_GATE_FREEZE_SEC", "30"))
 _streams = {}
-_preview_lot = "loop1"
+_preview_lot = "yen1"
 _lock = threading.Lock()
 # Serializes OCR calls across annotated streams (PaddleOCR shared reader).
 _ocr_lock = threading.Lock()
@@ -114,15 +110,15 @@ class CameraSimulator:
                 self._position_sec = 0.0
 
 
-class ScheduledLoop1Simulator(CameraSimulator):
+class ScheduledGateLotSimulator(CameraSimulator):
     """
-    loop1.mp4: başlangıçta giriş, bitişte çıkış plaka videosu;
+    Birincil otopark videosu (yen1): başlangıçta giriş, bitişte çıkış;
     son kare FREEZE_SEC saniye dondurulur, sonra döngü tekrarlanır.
     """
 
     def __init__(self, lot_key: str, video_path: str, freeze_sec: float = None):
         super().__init__(lot_key, video_path)
-        self._freeze_sec = freeze_sec if freeze_sec is not None else _LOOP1_FREEZE_SEC
+        self._freeze_sec = freeze_sec if freeze_sec is not None else _GATE_FREEZE_SEC
 
     def _play_loop(self):
         while self._running:
@@ -432,38 +428,48 @@ def get_gate_status() -> dict:
 
 def _normalize_lot(lot_ref: str) -> str:
     ref = (lot_ref or "").strip().lower().replace(".mp4", "")
-    if ref.startswith("loop"):
+    if ref.startswith("yen"):
         return ref
+    if ref.startswith("loop"):
+        n = ref.replace("loop", "")
+        if n.isdigit():
+            return f"yen{n}"
     if ref in ("giris", "entry", "giriş"):
         return "giris"
     if ref in ("cikis", "exit", "çıkış", "cikis_v"):
         return "cikis"
-    if ref in ("1", "2", "3"):
-        return f"loop{ref}"
+    if ref in ("1", "2", "3", "4", "5"):
+        return f"yen{ref}"
     if ref.startswith("istasyon"):
         n = ref.replace("istasyon", "")
         if n.isdigit():
-            return f"loop{n}"
-    return ref or "loop1"
+            return f"yen{n}"
+    return ref or "yen1"
 
 
 def _resolve_video_path(lot_key: str) -> Path:
     key = _normalize_lot(lot_key)
-    if key in _SPECIAL_VIDEOS:
-        sp = _PROJECT_ROOT / _SPECIAL_VIDEOS[key]
-        if sp.is_file():
-            return sp
+    if key == "giris":
+        for name in ("giris.mp4", "plakaokuma.mp4"):
+            p = _PROJECT_ROOT / name
+            if p.is_file():
+                return p
+    if key == "cikis":
+        for name in ("cikis.mp4", "plakaokuma.mp4"):
+            p = _PROJECT_ROOT / name
+            if p.is_file():
+                return p
     p = _PROJECT_ROOT / f"{key}.mp4"
     if p.is_file():
         return p
-    return _PROJECT_ROOT / "loop1.mp4"
+    return _PROJECT_ROOT / "yen1.mp4"
 
 
 def list_available_videos():
     out = []
     for i in range(1, 10):
-        name = f"loop{i}.mp4"
-        key = f"loop{i}"
+        key = f"yen{i}"
+        name = f"{key}.mp4"
         path = _PROJECT_ROOT / name
         if path.is_file():
             out.append({"id": key, "name": name, "label": f"Otopark {i}", "lot_key": key})
@@ -492,7 +498,7 @@ def set_preview_lot(lot_key: str):
 
 
 def start_all_cameras():
-    """loop1, loop2, loop3 — hepsini paralel başlat."""
+    """yen1..yen5 — hepsini paralel başlat."""
     global _streams
     for lot in _DEFAULT_LOTS:
         path = _resolve_video_path(lot)
@@ -501,13 +507,12 @@ def start_all_cameras():
             continue
         if lot in _streams:
             continue
-        if lot == "loop1":
-            sim = ScheduledLoop1Simulator(lot, str(path))
+        if lot == _GATE_LOT:
+            sim = ScheduledGateLotSimulator(lot, str(path))
         else:
             sim = CameraSimulator(lot, str(path))
         sim.start()
         _streams[lot] = sim
-    # Giriş/çıkış: plakaokuma.mp4 — loop1 video başı/sonu ile tetiklenir.
     gate_labels = {"giris": "Giris Kamerasi", "cikis": "Cikis Kamerasi"}
     for lot in ("giris", "cikis"):
         if lot in _streams:
@@ -520,8 +525,8 @@ def start_all_cameras():
         sim.start()
         _streams[lot] = sim
     logger.info(
-        "Paralel kamera stream'leri: %s (loop1: baslangic=giris, son=cikis, freeze=%.0fs)",
-        list(_streams.keys()), _LOOP1_FREEZE_SEC,
+        "Paralel kamera stream'leri: %s (%s: baslangic=giris, son=cikis, freeze=%.0fs)",
+        list(_streams.keys()), _GATE_LOT, _GATE_FREEZE_SEC,
     )
 
 
@@ -623,7 +628,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path.startswith("/timeline"):
             m = re.match(r"/timeline/([\w]+)", path)
-            lot = _normalize_lot(m.group(1) if m else "loop1")
+            lot = _normalize_lot(m.group(1) if m else "yen1")
             sim = _streams.get(lot)
             tl = sim.get_timeline() if sim and hasattr(sim, "get_timeline") else {}
             payload = {"lot": lot, **tl}
@@ -741,7 +746,7 @@ def start_http_server():
         server = ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), _Handler)
         server.daemon_threads = True
         logger.info(
-            "Kamera HTTP (paralel, threaded): http://127.0.0.1:%s/snapshot/loop1.jpg ... loop3.jpg",
+            "Kamera HTTP (paralel, threaded): http://127.0.0.1:%s/snapshot/yen1.jpg ... yen5.jpg",
             HTTP_PORT,
         )
         server.serve_forever()

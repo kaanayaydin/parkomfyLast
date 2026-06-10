@@ -29,7 +29,8 @@ public class ParkingSetupService {
         this.yoloInference = yoloInference;
     }
 
-    private static final Set<String> ALLOWED_VIDEOS = Set.of("loop1", "loop2", "loop3");
+    private static final Set<String> ALLOWED_VIDEOS = Set.of(
+        "yen1", "yen2", "yen3", "yen4", "yen5");
 
     public void resetParkingData() {
         repository.resetAllParkingData();
@@ -228,11 +229,14 @@ public class ParkingSetupService {
 
     private String normalizeVideoLotKey(String lotKey) {
         if (lotKey == null || lotKey.isBlank()) {
-            throw new IllegalArgumentException("Kamera videosu seçin (loop1, loop2 veya loop3)");
+            throw new IllegalArgumentException("Kamera videosu seçin (yen1 .. yen5)");
         }
         String key = lotKey.trim().toLowerCase().replace(".mp4", "");
+        if (key.startsWith("loop") && key.length() > 4 && Character.isDigit(key.charAt(4))) {
+            key = "yen" + key.substring(4);
+        }
         if (!ALLOWED_VIDEOS.contains(key)) {
-            throw new IllegalArgumentException("Geçersiz video: " + lotKey + " (loop1, loop2, loop3)");
+            throw new IllegalArgumentException("Geçersiz video: " + lotKey + " (yen1 .. yen5)");
         }
         return key;
     }

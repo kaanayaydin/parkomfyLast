@@ -37,13 +37,13 @@ async function ensureAdminLogin() {
 const LIVE_SNAPSHOT_MS = 100;
 
 function snapshotUrlForLot(lotKey) {
-  const lot = (lotKey || 'loop1').replace('.mp4', '');
+  const lot = (lotKey || 'yen1').replace('.mp4', '');
   return `${SNAPSHOT_URL}?lot=${encodeURIComponent(lot)}`;
 }
 let snapshotTimer = null;
 
 const state = {
-  currentVideo: 'loop1',
+  currentVideo: 'yen1',
   view: 'list',
   step: 1,
   areas: [],
@@ -143,7 +143,7 @@ async function loadVideoOptions() {
     const sel = document.getElementById('videoSelect');
     if (!sel) return;
     const videos = data.videos || [];
-    const current = (data.current || 'loop1.mp4').replace('.mp4', '');
+    const current = (data.current || 'yen1.mp4').replace('.mp4', '');
     state.currentVideo = current;
     sel.innerHTML = videos.map((v) =>
       `<option value="${v.id}" ${v.id === current ? 'selected' : ''}>${v.label} (${v.name})</option>`
@@ -151,7 +151,7 @@ async function loadVideoOptions() {
   } catch {
     const sel = document.getElementById('videoSelect');
     if (sel) {
-      sel.innerHTML = '<option value="loop1">Loop 1</option><option value="loop2">Loop 2</option><option value="loop3">Loop 3</option>';
+      sel.innerHTML = '<option value="yen1">Otopark 1</option><option value="yen2">Otopark 2</option><option value="yen3">Otopark 3</option><option value="yen4">Otopark 4</option><option value="yen5">Otopark 5</option>';
     }
   }
 }
@@ -179,9 +179,7 @@ async function onVideoChange(videoId) {
 
 function videoLabel(lotKey) {
   const v = (lotKey || '').replace('.mp4', '');
-  if (v === 'loop1') return 'loop1.mp4';
-  if (v === 'loop2') return 'loop2.mp4';
-  if (v === 'loop3') return 'loop3.mp4';
+  if (v.startsWith('yen')) return `${v}.mp4`;
   return lotKey || '—';
 }
 
@@ -192,7 +190,7 @@ function currentLotKey() {
   if (state.view === 'setup' && state.setup.lotKey) {
     return state.setup.lotKey.replace('.mp4', '');
   }
-  return state.currentVideo || 'loop1';
+  return state.currentVideo || 'yen1';
 }
 
 // ─── Liste ───
@@ -202,7 +200,7 @@ async function loadAreas() {
   const list = document.getElementById('areaList');
   updateAreaVideoOptions();
   if (!state.areas.length) {
-    list.innerHTML = '<p class="hint">Henüz otopark yok. 3 otopark için sırayla loop1, loop2, loop3 videolarıyla kayıt oluşturun.</p>';
+    list.innerHTML = '<p class="hint">Henüz otopark yok. 5 otopark için sırayla yen1 .. yen5 videolarıyla kayıt oluşturun.</p>';
     return;
   }
   list.innerHTML = state.areas.map((a) => `
@@ -243,11 +241,8 @@ function updateAreaVideoOptions() {
   [...sel.options].forEach((opt) => {
     const taken = used.has(opt.value);
     opt.disabled = taken;
-    opt.textContent = opt.value === 'loop1'
-      ? `1. Otopark — loop1.mp4${taken ? ' (kullanımda)' : ''}`
-      : opt.value === 'loop2'
-        ? `2. Otopark — loop2.mp4${taken ? ' (kullanımda)' : ''}`
-        : `3. Otopark — loop3.mp4${taken ? ' (kullanımda)' : ''}`;
+    const n = opt.value.replace('yen', '');
+    opt.textContent = `${n}. Otopark — ${opt.value}.mp4${taken ? ' (kullanımda)' : ''}`;
   });
   const firstFree = [...sel.options].find((o) => !o.disabled);
   if (firstFree) sel.value = firstFree.value;
@@ -318,7 +313,7 @@ async function resetAllParking() {
 
 async function predictFromLive() {
   toast('Model işliyor…');
-  const lot = (state.setup.lotKey || 'loop1').replace('.mp4', '');
+  const lot = (state.setup.lotKey || 'yen1').replace('.mp4', '');
   const res = await api(`/camera/live/predict-slots?lot=${encodeURIComponent(lot)}`, { method: 'POST' });
   if (!res.success) { toast(res.message || 'Tahmin başarısız'); return; }
   applyPrediction(res.data);

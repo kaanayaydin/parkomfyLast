@@ -456,7 +456,7 @@ const AdminParkingSetupScreen = ({ onBack, onDone }) => {
       {step === 2 && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Canlı kamera simülasyonu ({areaId})</Text>
-          <LiveCameraView height={200} lotKey={lotKey || 'loop1'} />
+          <LiveCameraView height={200} lotKey={lotKey || 'yen1'} />
           {step === 2 && (
             <>
               <TouchableOpacity style={[styles.btn, styles.liveBtn]} onPress={handlePredictFromLive} disabled={loading}>

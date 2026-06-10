@@ -19,7 +19,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Hibrit doluluk: kalibre poligon + best.pt (Bos/Dolu); yoksa yolov8n fallback.
- * Her otopark kendi video stream'inden (loop1/2/3) eşzamanlı okunur.
+ * Her otopark kendi video stream'inden (yen1..yen5) eşzamanlı okunur.
  * Plaka: slot yeni dolunca araç kırpımı OCR.
  */
 public class OccupancySyncService {
@@ -84,7 +84,7 @@ public class OccupancySyncService {
 
         String lotKey = repository.getLotKey(areaId);
         if (lotKey == null || lotKey.isBlank()) {
-            lotKey = "loop1";
+            lotKey = CameraSimulationService.PRIMARY_GATE_LOT;
         }
         byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lotKey);
         LiveParkingStatusDto dto = liveParkingService.getLiveStatus(areaId, start, end);
@@ -165,7 +165,7 @@ public class OccupancySyncService {
         }
         String lotKey = repository.getLotKey(areaId);
         if (lotKey == null || lotKey.isBlank()) {
-            lotKey = "loop1";
+            lotKey = CameraSimulationService.PRIMARY_GATE_LOT;
         }
         byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lotKey);
         Map<Integer, ParkingSlotResultDto> bySlotNumber = new HashMap<>();
@@ -207,7 +207,7 @@ public class OccupancySyncService {
 
         String lotKey = repository.getLotKey(areaId);
         if (lotKey == null || lotKey.isBlank()) {
-            lotKey = "loop1";
+            lotKey = CameraSimulationService.PRIMARY_GATE_LOT;
         }
 
         byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lotKey);
@@ -294,7 +294,7 @@ public class OccupancySyncService {
 
     /** Giriş plaka videosu bitince DB'ye plaka yaz (video Python'da tetiklenir). */
     private void watchGateEntranceComplete(String areaId, String lotKey) {
-        if (!"loop1".equals(lotKey)) {
+        if (!CameraSimulationService.PRIMARY_GATE_LOT.equals(lotKey)) {
             return;
         }
         boolean playing = cameraSimulationService.isGatePlaying("giris");
@@ -306,9 +306,9 @@ public class OccupancySyncService {
     }
 
 
-    /** Çıkış plaka videosu bitince çıkış OCR (video Python'da loop1 sonunda tetiklenir). */
+    /** Çıkış plaka videosu bitince çıkış OCR (video Python'da yen1 sonunda tetiklenir). */
     private void watchGateExitComplete(String areaId, String lotKey) {
-        if (!"loop1".equals(lotKey)) {
+        if (!CameraSimulationService.PRIMARY_GATE_LOT.equals(lotKey)) {
             return;
         }
         boolean playing = cameraSimulationService.isGatePlaying("cikis");

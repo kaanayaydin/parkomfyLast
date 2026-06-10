@@ -135,8 +135,8 @@ python server.py
 ```
 
 - gRPC: `localhost:50051`
-- Kamera HTTP: `localhost:50052` (`loop1` / `loop2` / `loop3`, `giris`, `cikis`)
-- Kök dizinde `loop1.mp4`, `loop2.mp4`, `loop3.mp4` ve `best (2).pt` dosyaları olmalı (Git’e dahil değil)
+- Kamera HTTP: `localhost:50052` (`yen1` .. `yen5`, `giris`, `cikis`)
+- Kök dizinde `yen1.mp4` .. `yen5.mp4`, `giris.mp4`, `cikis.mp4` ve `best (2).pt` olmalı (Git’e dahil değil)
 
 ### 3) Spring Boot (REST API + admin)
 
@@ -166,7 +166,7 @@ Telefondan bağlanırken `frontend/src/config/api.js` içindeki `API_HOST_OVERRI
 | Spring Boot   | http://localhost:8080 |
 | Admin panel   | http://localhost:8080/admin |
 | gRPC (Python) | localhost:50051 |
-| Kamera HTTP   | http://127.0.0.1:50052/snapshot/loop1.jpg |
+| Kamera HTTP   | http://127.0.0.1:50052/snapshot/yen1.jpg |
 | MySQL         | localhost:3306 |
 
 ### İlk kurulum (bir kez)

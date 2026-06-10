@@ -10,7 +10,7 @@ import { getLiveCameraSnapshotUrl, getLiveCameraStatus, LIVE_CAMERA_POLL_MS } fr
  * bir sonraki istek, onceki kare yuklendikten intervalMs sonra atilir -> istek
  * yigilmaz, cihaz hizina gore akar.
  */
-const LiveCameraView = ({ height = 220, label, lotKey = 'loop1', intervalMs = LIVE_CAMERA_POLL_MS }) => {
+const LiveCameraView = ({ height = 220, label, lotKey = 'yen1', intervalMs = LIVE_CAMERA_POLL_MS }) => {
   const displayLabel = label || `Canlı Kamera (${lotKey})`;
   const [baseUri, setBaseUri] = useState(null); // ekranda kalan son kare
   const [topUri, setTopUri] = useState(null); // arka planda yuklenen yeni kare

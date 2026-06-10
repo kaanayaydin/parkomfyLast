@@ -475,8 +475,8 @@ export async function createParkingArea({ areaName, address, lotKey }) {
 /** Admin web ile aynı snapshot polling aralığı (ms) */
 export const LIVE_CAMERA_POLL_MS = 100;
 
-export function getLiveCameraSnapshotUrl(lotKey = 'loop1', cacheBust = Date.now()) {
-  const lot = String(lotKey || 'loop1').replace('.mp4', '');
+export function getLiveCameraSnapshotUrl(lotKey = 'yen1', cacheBust = Date.now()) {
+  const lot = String(lotKey || 'yen1').replace('.mp4', '');
   return `${API_BASE}/camera/live/snapshot?lot=${encodeURIComponent(lot)}&t=${cacheBust}`;
 }
 

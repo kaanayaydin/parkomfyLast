@@ -24,7 +24,7 @@ public class SchedulingConfig {
         notificationService.processReservationReminders();
     }
 
-    /** loop1 doluluk + giriş/çıkış plaka senkronu (~2 sn). */
+    /** yen1 doluluk + giriş/çıkış plaka senkronu (~2 sn). */
     @Scheduled(fixedRate = 2000)
     public void occupancySync() {
         occupancySyncService.syncAllCalibratedAreas();

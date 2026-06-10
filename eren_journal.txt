@@ -27,7 +27,8 @@ Mimari:
 
 Önemli yerel dosyalar (Git'e dahil değil):
   - best (2).pt — YOLO slot kalibrasyon modeli
-  - loop1.mp4, loop2.mp4, loop3.mp4 — kamera simülasyon videoları
+  - yen1.mp4 .. yen5.mp4 — otopark kameraları
+  - giris.mp4, cikis.mp4 — giriş/çıkış plaka videoları
 
 
 --------------------------------------------------------------------------------
@@ -259,5 +260,6 @@ GÜNCELLEME LOGU (kısa satırlar — yeni işler buraya eklenir)
 2026-06-10 | OccupancySyncService: watchGateExitComplete; doluluk tabanli cikis tetigi kaldirildi.
 2026-06-10 | Admin/mobil kamera senkronu: LIVE_CAMERA_POLL_MS=100, currentLotKey(), timeline header, CameraFrame Java.
 2026-06-10 | CS402_SON_RAPOR.md — son teslim raporu olusturuldu.
+2026-06-10 | loop1/2/3 -> yen1..yen5; giris.mp4 + cikis.mp4; AREA-001 kalibrasyon; 5 otopark seed.
 
 ================================================================================

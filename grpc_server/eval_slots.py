@@ -5,7 +5,7 @@ Slot doluluk dogrulugu: precision / recall / F1 / accuracy + confusion matrix.
 Iki adimli kullanim (manuel sayim karsilastirmasi - rapordaki yontem):
 
 1) TAHMIN URET (videodan kare ornekle, modeli calistir, CSV yaz):
-     python eval_slots.py predict --video ../loop1.mp4 --area AREA-004 \
+     python eval_slots.py predict --video ../yen1.mp4 --area AREA-001 \
             --n 20 --out slots_pred.csv
    Cikan CSV sutunlari: frame,slot_number,pred_occupied,truth_occupied
    'truth_occupied' BOS gelir. Her satira videodaki o karede slot gercekten
@@ -129,7 +129,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("predict", help="videodan tahmin uret -> CSV")
-    p.add_argument("--video", default=str(_ROOT / "loop1.mp4"))
+    p.add_argument("--video", default=str(_ROOT / "yen1.mp4"))
     p.add_argument("--area", default="AREA-004")
     p.add_argument("--n", type=int, default=20, help="ornek kare sayisi")
     p.add_argument("--out", default="slots_pred.csv")

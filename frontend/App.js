@@ -118,7 +118,7 @@ export default function App() {
       areaId: a.areaId,
       name: a.areaName,
       location: a.address || '',
-      lotKey: a.lotKey || 'loop1',
+      lotKey: a.lotKey || 'yen1',
       price: hourlyRate,
       hourlyRate,
       firstHourRate,
@@ -127,7 +127,7 @@ export default function App() {
       slots: Array.from({ length: a.slotCount || 0 }, (_, i) => ({
         id: i + 1,
         status: 'available',
-        slotId: `SLOT-${a.lotKey || 'loop1'}-${i + 1}`,
+        slotId: `SLOT-${a.lotKey || 'yen1'}-${i + 1}`,
       })),
     };
   });

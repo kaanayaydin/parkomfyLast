@@ -145,7 +145,7 @@ class RtspSource(CameraSource):
 def resolve_video_path(video_ref: str) -> Path:
     ref = (video_ref or "").strip()
     if not ref:
-        return _PROJECT_ROOT / "loop1.mp4"
+        return _PROJECT_ROOT / "yen1.mp4"
     if ref.endswith(".mp4"):
         p = _PROJECT_ROOT / ref
         if p.is_file():
@@ -157,7 +157,7 @@ def resolve_video_path(video_ref: str) -> Path:
     p = Path(ref)
     if p.is_file():
         return p
-    return _PROJECT_ROOT / "loop1.mp4"
+    return _PROJECT_ROOT / "yen1.mp4"
 
 
 def create_camera_source(video_path=None) -> CameraSource:
@@ -169,5 +169,5 @@ def create_camera_source(video_path=None) -> CameraSource:
     if rtsp:
         return RtspSource(rtsp)
     env = os.environ.get("PARKOMFY_CAMERA_VIDEO")
-    path = resolve_video_path(video_path or env or "loop1")
+    path = resolve_video_path(video_path or env or "yen1")
     return VideoFileSource(str(path))

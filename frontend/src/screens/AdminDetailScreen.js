@@ -17,7 +17,7 @@ import {
 
 const AdminDetailScreen = ({ otopark, onBack }) => {
   const areaId = otopark.areaId;
-  const lotKey = otopark.lotKey || 'loop1';
+  const lotKey = otopark.lotKey || 'yen1';
   const [live, setLive] = useState(null);
   const [reservations, setReservations] = useState([]);
   const [sessions, setSessions] = useState([]);

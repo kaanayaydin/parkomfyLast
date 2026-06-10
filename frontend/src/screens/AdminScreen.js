@@ -42,7 +42,7 @@ const AdminScreen = ({ onEnterDetail, onNewParking }) => {
               id: item.areaId,
               name: item.areaName,
               areaId: item.areaId,
-              lotKey: item.lotKey || 'loop1',
+              lotKey: item.lotKey || 'yen1',
               slotCount: item.slotCount,
               calibrated: item.calibrated,
             })}

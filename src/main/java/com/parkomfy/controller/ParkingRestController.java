@@ -125,6 +125,18 @@ public class ParkingRestController {
         return ResponseEntity.status(response.getStatusCode()).body(response);
     }
 
+    @GetMapping("/parking/reservation-view")
+    public ResponseEntity<ApiResponse<AreaReservationViewDto>> getReservationView(
+            @RequestParam String areaId,
+            @RequestParam String startTime,
+            @RequestParam String endTime,
+            @RequestParam(required = false) String timelineStart,
+            @RequestParam(required = false) String timelineEnd) {
+        ApiResponse<AreaReservationViewDto> response = apiController.getReservationView(
+            areaId, startTime, endTime, timelineStart, timelineEnd);
+        return ResponseEntity.status(response.getStatusCode()).body(response);
+    }
+
     @GetMapping(value = "/parking/live-image", produces = MediaType.IMAGE_JPEG_VALUE)
     public ResponseEntity<byte[]> getLiveParkingImage(@RequestParam String areaId) {
         byte[] cached = eventBroadcaster.getCachedImage(areaId);

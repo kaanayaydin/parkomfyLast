@@ -4,11 +4,13 @@ import {
   SafeAreaView, ActivityIndicator, Platform, Modal, Pressable,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import SlotTimelineChart from '../components/SlotTimelineChart';
 import {
-  getLiveParkingStatus,
+  getReservationView,
   buildDateTimeFromDate,
   formatDateLabel,
   formatTimeLabel,
+  formatDateTime,
   startOfToday,
   applyDatePart,
   applyTimePart,
@@ -57,7 +59,7 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
   });
   const [activePicker, setActivePicker] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [availableIds, setAvailableIds] = useState(new Set());
+  const [slotViews, setSlotViews] = useState({});
   const [loading, setLoading] = useState(false);
 
   const startTime = useMemo(() => buildDateTimeFromDate(startAt), [startAt]);
@@ -98,33 +100,51 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
     if (activePicker === 'endTime') setEndAt(applyTimePart(endAt, selected));
   };
 
+  const timelineStart = useMemo(() => {
+    const d = new Date(startAt);
+    d.setMinutes(0, 0, 0);
+    return buildDateTimeFromDate(d);
+  }, [startAt]);
+
+  const timelineEnd = useMemo(() => {
+    const d = new Date(endAt);
+    d.setMinutes(0, 0, 0);
+    d.setHours(d.getHours() + 2);
+    return buildDateTimeFromDate(d);
+  }, [endAt]);
+
   useEffect(() => {
     if (!areaId || !isValidRange) {
-      setAvailableIds(new Set());
+      setSlotViews({});
       return;
     }
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       try {
-        const res = await getLiveParkingStatus(areaId, startTime, endTime);
+        const res = await getReservationView(
+          areaId, startTime, endTime, timelineStart, timelineEnd
+        );
         if (!cancelled && res.success) {
-          const ids = (res.data?.slots || [])
-            .filter((s) => s.availableForBooking)
-            .map((s) => s.slotId);
-          setAvailableIds(new Set(ids));
+          const map = {};
+          (res.data?.slots || []).forEach((s) => { map[s.slotId] = s; });
+          setSlotViews(map);
         }
       } catch {
-        if (!cancelled) setAvailableIds(new Set());
+        if (!cancelled) setSlotViews({});
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
     load();
     return () => { cancelled = true; };
-  }, [areaId, startTime, endTime, isValidRange]);
+  }, [areaId, startTime, endTime, timelineStart, timelineEnd, isValidRange]);
 
   const resolveSlotId = (slot) => slot.slotId || null;
+
+  const selectedView = selectedSlot
+    ? slotViews[selectedParking?.slots?.find((s) => s.id === selectedSlot)?.slotId]
+    : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -169,26 +189,71 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
           </Text>
         )}
 
-        <Text style={styles.label}>Slot Seçin (Kırmızı: seçilen aralıkta dolu)</Text>
+        <Text style={styles.label}>Doluluk Çizelgesi (seçtiğiniz saat aralığı)</Text>
+        <Text style={styles.hint}>
+          Yeşil: boş · Turuncu: rezerve · Kırmızı: şu an canlı dolu. Dakika bile çakışma kabul edilmez.
+        </Text>
+        {!selectedSlot && (
+          <Text style={styles.hint}>Saatlik çizelgeyi görmek için aşağıdan bir slot seçin.</Text>
+        )}
+        {selectedView?.timeline?.length > 0 && (
+          <SlotTimelineChart
+            timeline={selectedView.timeline}
+            reservations={selectedView.reservationsInTimeline || []}
+            rangeStart={startTime}
+            rangeEnd={endTime}
+            title={`Slot ${selectedSlot} — saatlik doluluk`}
+          />
+        )}
+        {selectedView?.reservationsInTimeline?.length > 0 && !selectedView?.timeline?.length && (
+          <View style={styles.resBox}>
+            {selectedView.reservationsInTimeline.map((r) => (
+              <Text key={r.reservationId} style={styles.resLine}>
+                Rezerve: {formatTimeLabel(new Date(r.startTime))} – {formatTimeLabel(new Date(r.endTime))} · {r.licensePlate}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        <Text style={styles.label}>Slot Seçin</Text>
         {loading ? (
           <ActivityIndicator color="#1A237E" style={{ marginVertical: 20 }} />
         ) : (
           <View style={styles.grid}>
             {selectedParking?.slots?.map((slot) => {
               const slotId = resolveSlotId(slot);
-              const available = slotId ? availableIds.has(slotId) : false;
+              const view = slotId ? slotViews[slotId] : null;
+              const available = view?.bookableForRange === true;
+              const liveFull = view?.physicallyOccupiedNow;
+              const reserved = view?.reservationStatus === 'RESERVED_CONFLICT';
+              const hasRes = (view?.reservationsInTimeline?.length || 0) > 0;
               return (
                 <TouchableOpacity
                   key={slotId || slot.id}
-                  disabled={!available || !isValidRange}
                   style={[
                     styles.slot,
                     selectedSlot === slot.id && styles.activeSlot,
-                    !available && styles.occSlot,
+                    liveFull && styles.liveSlot,
+                    !available && !liveFull && styles.occSlot,
+                    reserved && !liveFull && styles.resSlot,
+                    liveFull && hasRes && styles.liveResSlot,
                   ]}
                   onPress={() => setSelectedSlot(slot.id)}
                 >
-                  <Text style={[styles.slotText, !available && styles.occText]}>{slot.id}</Text>
+                  <Text style={[styles.slotText, !available && styles.occText]}>Slot {slot.id}</Text>
+                  <Text style={styles.slotBadge}>
+                    {view?.displayLabel || (available ? 'Müsait' : 'Dolu')}
+                  </Text>
+                  {hasRes && (
+                    <Text style={styles.resBadge} numberOfLines={2}>
+                      {(view.reservationsInTimeline || []).map((r) =>
+                        `${formatDateTime(r.startTime)} → ${formatDateTime(r.endTime)}`
+                      ).join('\n')}
+                    </Text>
+                  )}
+                  {view?.blockReason ? (
+                    <Text style={styles.blockHint} numberOfLines={3}>{view.blockReason}</Text>
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -218,7 +283,10 @@ const SlotSelectionScreen = ({ onNavigate, selectedParking, areaId, licensePlate
             durationHours,
             parkingName: selectedParking?.name,
           })}
-          disabled={!selectedSlot || !isValidRange}
+          disabled={
+            !selectedSlot || !isValidRange
+            || !slotViews[selectedParking?.slots?.find((s) => s.id === selectedSlot)?.slotId]?.bookableForRange
+          }
         >
           <Text style={styles.confirmTxt}>Ödemeye Geç</Text>
         </TouchableOpacity>
@@ -282,6 +350,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: 'bold', color: '#1A237E', marginBottom: 12 },
   sectionTitle: { fontSize: 15, fontWeight: 'bold', color: '#1A237E', marginTop: 8, marginBottom: 8 },
   label: { fontSize: 13, fontWeight: 'bold', color: '#666', marginBottom: 8, marginTop: 16 },
+  hint: { fontSize: 11, color: '#888', lineHeight: 16, marginBottom: 8 },
   subLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6 },
   pickerField: { flex: 1, minWidth: 0 },
   row2: { flexDirection: 'row', gap: 10, marginBottom: 4 },
@@ -304,7 +373,15 @@ const styles = StyleSheet.create({
   slot: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, width: '46%', marginBottom: 15, alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
   activeSlot: { borderColor: '#B2FF59', borderWidth: 2 },
   occSlot: { backgroundColor: '#FFEBEE', borderColor: '#FFCDD2' },
-  slotText: { fontWeight: 'bold', color: '#1A237E' },
+  resSlot: { backgroundColor: '#FFF3E0', borderColor: '#FFCC80' },
+  liveSlot: { backgroundColor: '#FFCDD2', borderColor: '#E53935', borderWidth: 2 },
+  liveResSlot: { borderColor: '#FB8C00', borderWidth: 2 },
+  resBox: { backgroundColor: '#FFF8E1', padding: 10, borderRadius: 8, marginBottom: 10 },
+  resLine: { fontSize: 12, color: '#E65100', marginBottom: 4 },
+  resBadge: { fontSize: 9, color: '#E65100', marginTop: 4, fontWeight: '600', textAlign: 'center' },
+  slotText: { fontWeight: 'bold', color: '#1A237E', fontSize: 16 },
+  slotBadge: { fontSize: 11, fontWeight: '700', color: '#555', marginTop: 4 },
+  blockHint: { fontSize: 9, color: '#888', marginTop: 4, textAlign: 'center' },
   occText: { color: '#EF5350' },
   footer: {
     flexDirection: 'row',

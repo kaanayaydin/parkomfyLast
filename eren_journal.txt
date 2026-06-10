@@ -246,5 +246,7 @@ GÜNCELLEME LOGU (kısa satırlar — yeni işler buraya eklenir)
 2026-06-09 | eren_journal.txt ilk oluşturma; tüm önceki oturumlar özetlendi.
 2026-06-09 | Admin mobil modu: AdminScreen/Detail/Reservations App.js entegrasyonu.
 2026-06-09 | Git push: develop-eren → origin (commit 42e60b5, 41 dosya).
+2026-06-09 | Rezervasyon: sıfır tolerans çakışma, reservation-view API, mobil zaman çizelgesi (SlotTimelineChart), canlı doluluk ayrı gösterim.
+2026-06-09 | Fix: canlı dolu slot rezerve edilemez; rezerve saatler çizelgede LIVE_RESERVED ile görünür; dolu slot seçilebilir (sadece görüntüleme).
 
 ================================================================================

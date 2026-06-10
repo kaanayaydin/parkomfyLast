@@ -210,6 +210,16 @@ export async function getLiveParkingStatus(areaId, startTime, endTime) {
   return res.json();
 }
 
+/** Rezervasyon zaman çizelgesi + sıkı çakışma (canlı doluluk ayrı). */
+export async function getReservationView(areaId, startTime, endTime, timelineStart, timelineEnd) {
+  let url = `${API_BASE}/parking/reservation-view?areaId=${encodeURIComponent(areaId)}`;
+  url += `&startTime=${encodeURIComponent(startTime)}&endTime=${encodeURIComponent(endTime)}`;
+  if (timelineStart) url += `&timelineStart=${encodeURIComponent(timelineStart)}`;
+  if (timelineEnd) url += `&timelineEnd=${encodeURIComponent(timelineEnd)}`;
+  const res = await fetch(url);
+  return res.json();
+}
+
 export function getLiveImageUrl(areaId) {
   return `${API_BASE}/parking/live-image?areaId=${encodeURIComponent(areaId)}&t=${Date.now()}`;
 }

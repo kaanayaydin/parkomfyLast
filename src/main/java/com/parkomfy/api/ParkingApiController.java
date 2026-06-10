@@ -34,6 +34,7 @@ public class ParkingApiController {
     private final ParkingSetupService parkingSetupService;
     private final PlateSimulationService plateSimulationService;
     private final OccupancySyncService occupancySyncService;
+    private final ReservationAvailabilityService reservationAvailabilityService;
     
     public ParkingApiController(IParkingService parkingService,
                                IPaymentService paymentService,
@@ -46,7 +47,8 @@ public class ParkingApiController {
                                ParkingEventBroadcaster broadcaster,
                                ParkingSetupService parkingSetupService,
                                PlateSimulationService plateSimulationService,
-                               OccupancySyncService occupancySyncService) {
+                               OccupancySyncService occupancySyncService,
+                               ReservationAvailabilityService reservationAvailabilityService) {
         this.parkingService = parkingService;
         this.paymentService = paymentService;
         this.detectionService = detectionService;
@@ -59,6 +61,7 @@ public class ParkingApiController {
         this.parkingSetupService = parkingSetupService;
         this.plateSimulationService = plateSimulationService;
         this.occupancySyncService = occupancySyncService;
+        this.reservationAvailabilityService = reservationAvailabilityService;
     }
 
     /** Admin video overlay — anlık hibrit tespit (CMD logları ile aynı kaynak). */
@@ -119,6 +122,33 @@ public class ParkingApiController {
             return ApiResponse.error(e.getMessage(), 400);
         } catch (Exception e) {
             return ApiResponse.error("Error retrieving live status: " + e.getMessage(), 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/parking/reservation-view
+     * Rezervasyon zaman çizelgesi + sıkı çakışma kontrolü (canlı doluluk ayrı).
+     */
+    public ApiResponse<AreaReservationViewDto> getReservationView(String areaId, String startTime,
+                                                                  String endTime, String timelineStart,
+                                                                  String timelineEnd) {
+        try {
+            LocalDateTime start = parseDateTime(startTime);
+            LocalDateTime end = parseDateTime(endTime);
+            LocalDateTime tlStart = timelineStart != null && !timelineStart.isBlank()
+                ? parseDateTime(timelineStart) : null;
+            LocalDateTime tlEnd = timelineEnd != null && !timelineEnd.isBlank()
+                ? parseDateTime(timelineEnd) : null;
+            AreaReservationViewDto view = reservationAvailabilityService.getReservationView(
+                areaId, start, end, tlStart, tlEnd);
+            if (view == null) {
+                return ApiResponse.error("Parking area not found", 404);
+            }
+            return ApiResponse.success(view, "Reservation view retrieved");
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage(), 400);
+        } catch (Exception e) {
+            return ApiResponse.error("Error retrieving reservation view: " + e.getMessage(), 500);
         }
     }
     

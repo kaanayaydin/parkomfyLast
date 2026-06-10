@@ -3,6 +3,8 @@ package com.parkomfy.service;
 import com.parkomfy.model.*;
 import com.parkomfy.repository.IParkingRepository;
 
+import com.parkomfy.util.TimeRangeUtil;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ public class ReservationService {
 
     private final IParkingRepository repository;
     private LiveParkingService liveParkingService;
+    private ReservationAvailabilityService availabilityService;
 
     public ReservationService(IParkingRepository repository) {
         this.repository = repository;
@@ -23,6 +26,10 @@ public class ReservationService {
 
     public void setLiveParkingService(LiveParkingService liveParkingService) {
         this.liveParkingService = liveParkingService;
+    }
+
+    public void setAvailabilityService(ReservationAvailabilityService availabilityService) {
+        this.availabilityService = availabilityService;
     }
 
     public List<ParkingSlot> findAvailableSlotsForRange(String areaId, LocalDateTime start, LocalDateTime end) {
@@ -69,7 +76,20 @@ public class ReservationService {
         if (slot == null) {
             throw new IllegalArgumentException("Slot not found: " + slotId);
         }
-        if (!isSlotAvailableForRange(slotId, start, end)) {
+        if (availabilityService != null) {
+            com.parkomfy.api.AreaReservationViewDto view = availabilityService.getReservationView(
+                areaId, start, end, null, null);
+            com.parkomfy.api.SlotReservationViewDto slotView = view.getSlots().stream()
+                .filter(s -> slotId.equals(s.getSlotId()))
+                .findFirst()
+                .orElse(null);
+            if (slotView == null || !slotView.isBookableForRange()) {
+                String reason = slotView != null && slotView.getBlockReason() != null
+                    ? slotView.getBlockReason()
+                    : "Slot seçilen saat aralığında müsait değil";
+                throw new IllegalStateException(reason + " (dakika bile çakışma kabul edilmez)");
+            }
+        } else if (!isSlotAvailableForRange(slotId, start, end)) {
             throw new IllegalStateException("Slot is not available for the selected time range");
         }
 

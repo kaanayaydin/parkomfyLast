@@ -30,7 +30,7 @@ public class SlotReservation {
     }
 
     public boolean overlaps(LocalDateTime rangeStart, LocalDateTime rangeEnd) {
-        return startTime.isBefore(rangeEnd) && endTime.isAfter(rangeStart);
+        return com.parkomfy.util.TimeRangeUtil.overlaps(startTime, endTime, rangeStart, rangeEnd);
     }
 
     public boolean isActiveAt(LocalDateTime instant) {

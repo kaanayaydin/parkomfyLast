@@ -61,10 +61,19 @@ public class ParkomfySpringApplication {
     }
 
     @Bean
+    public ReservationAvailabilityService reservationAvailabilityService(
+            IParkingRepository repository,
+            OccupancySyncService occupancySyncService) {
+        return new ReservationAvailabilityService(repository, occupancySyncService);
+    }
+
+    @Bean
     public ReservationService reservationService(IParkingRepository repository,
-                                                 LiveParkingService liveParkingService) {
+                                                 LiveParkingService liveParkingService,
+                                                 ReservationAvailabilityService availabilityService) {
         ReservationService service = new ReservationService(repository);
         service.setLiveParkingService(liveParkingService);
+        service.setAvailabilityService(availabilityService);
         return service;
     }
 
@@ -135,11 +144,13 @@ public class ParkomfySpringApplication {
             ParkingEventBroadcaster broadcaster,
             ParkingSetupService parkingSetupService,
             PlateSimulationService plateSimulationService,
-            OccupancySyncService occupancySyncService) {
+            OccupancySyncService occupancySyncService,
+            ReservationAvailabilityService reservationAvailabilityService) {
         return new ParkingApiController(parkingService, paymentService, 
                                        detectionService, repository, reservationService,
                                        liveParkingService, plateTrackingService,
                                        notificationService, broadcaster, parkingSetupService,
-                                       plateSimulationService, occupancySyncService);
+                                       plateSimulationService, occupancySyncService,
+                                       reservationAvailabilityService);
     }
 }

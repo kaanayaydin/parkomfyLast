@@ -130,6 +130,50 @@ public class OccupancySyncService {
         return dto;
     }
 
+    /** Anlık hibrit/DB fiziksel doluluk — rezervasyon görünümü için (slotNumber → dolu). */
+    public Map<Integer, Boolean> getPhysicalOccupancyBySlotNumber(String areaId) {
+        Map<Integer, Boolean> result = new HashMap<>();
+        ParkingArea area = repository.getArea(areaId);
+        if (area == null) {
+            return result;
+        }
+        if (!repository.isAreaCalibrated(areaId)) {
+            for (ParkingSlot slot : area.getParkingSlots()) {
+                boolean occ = slot.getStatus() == ParkingSlot.SlotStatus.OCCUPIED
+                    || repository.getActiveSessionForSlot(slot.getSlotId()) != null;
+                result.put(slot.getSlotNumber(), occ);
+            }
+            return result;
+        }
+        String lotKey = repository.getLotKey(areaId);
+        if (lotKey == null || lotKey.isBlank()) {
+            lotKey = "loop1";
+        }
+        byte[] frame = cameraSimulationService.getLiveSnapshotForLot(lotKey);
+        Map<Integer, ParkingSlotResultDto> bySlotNumber = new HashMap<>();
+        if (frame != null && frame.length > 0) {
+            try {
+                for (ParkingSlotResultDto det : yoloInference.detectParkingSlots(frame, areaId)) {
+                    if (det.getSlotNumber() > 0) {
+                        bySlotNumber.put(det.getSlotNumber(), det);
+                    }
+                }
+            } catch (Exception ignored) {
+                // fallback DB
+            }
+        }
+        for (ParkingSlot slot : area.getParkingSlots()) {
+            ParkingSlotResultDto det = bySlotNumber.get(slot.getSlotNumber());
+            boolean physical = det != null && det.isOccupied() && det.getConfidence() >= MIN_OCC_CONF;
+            if (!physical) {
+                physical = slot.getStatus() == ParkingSlot.SlotStatus.OCCUPIED
+                    || repository.getActiveSessionForSlot(slot.getSlotId()) != null;
+            }
+            result.put(slot.getSlotNumber(), physical);
+        }
+        return result;
+    }
+
     public void syncAllCalibratedAreas() {
         for (ParkingArea area : repository.getAllAreas()) {
             if (repository.isAreaCalibrated(area.getAreaId())) {

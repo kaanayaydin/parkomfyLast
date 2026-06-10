@@ -69,6 +69,8 @@ public interface IParkingRepository {
     // Session helpers
     ParkingSession getActiveSessionForSlot(String slotId);
     ParkingSession getActiveSessionByPlate(String normalizedPlate);
+    ParkingSession getLeavingOrActiveSessionByPlate(String normalizedPlate);
+    List<ParkingSession> getLeavingSessions();
 
     // Vehicle helpers
     List<Vehicle> getRecentEnteredVehicles();

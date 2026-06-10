@@ -150,9 +150,13 @@ export default function App() {
     }
   };
 
-  const handleRegister = async ({ email, password, plate, fullName }) => {
+  const handleRegister = async ({ email, password, plate, fullName, kvkkAccepted }) => {
     if (!fullName?.trim() || !email?.trim() || !plate?.trim() || !password) {
       Alert.alert('Eksik bilgi', 'Tüm alanları doldurun');
+      return;
+    }
+    if (!kvkkAccepted) {
+      Alert.alert('KVKK onayı gerekli', 'Kayıt için aydınlatma metnini okuyup onaylamanız gerekir.');
       return;
     }
     try {

@@ -174,7 +174,8 @@ public class DatabaseManager implements IParkingRepository {
     private void seedMysqlData(Statement stmt) throws SQLException {
         stmt.executeUpdate(
             "INSERT INTO users (user_id, email, password_hash, full_name, license_plate, role) VALUES " +
-            "('USR-ADMIN', 'admin', '" + com.parkomfy.service.AuthService.hashPassword("1234") + "', " +
+            "('USR-ADMIN', 'admin', '" + com.parkomfy.service.AuthService.hashPassword(
+                com.parkomfy.service.AuthService.defaultAdminPassword()) + "', " +
             "'Yönetici', '34 OZU 450', 'ADMIN') " +
             "ON DUPLICATE KEY UPDATE role='ADMIN', full_name='Yönetici'");
         stmt.executeUpdate(
@@ -183,7 +184,8 @@ public class DatabaseManager implements IParkingRepository {
 
     private void seedDemoUsers() {
         User admin = new User("USR-ADMIN", "admin", null, "Yönetici");
-        admin.setPasswordHash(com.parkomfy.service.AuthService.hashPassword("1234"));
+        admin.setPasswordHash(com.parkomfy.service.AuthService.hashPassword(
+            com.parkomfy.service.AuthService.defaultAdminPassword()));
         admin.setLicensePlate("34 OZU 450");
         admin.setRole("ADMIN");
         demoUsers.put("admin", admin);
@@ -204,7 +206,29 @@ public class DatabaseManager implements IParkingRepository {
     }
 
     private void seedDemoAreas() {
-        // Demo otopark verisi yok — admin panelden oluşturulur
+        // MySQL yokken veriler bellekte tutulur ve her restart'ta silinir.
+        // Eren'in kalibrasyonu (grpc_server/calibrations/AREA-004.json) burada
+        // tohumlanir: loop1 videosu, videodaki 3 slot (poligon koseleriyle).
+        // Boylece restart sonrasi otopark eski haliyle geri gelir.
+        // MySQL acilirsa (ensureConnection) bu calismaz, gercek DB kullanilir.
+        ParkingArea area = new ParkingArea("AREA-004", "Otopark", "Özyeğin Üniversitesi");
+        double[][][] slotCorners = {
+            {{0.662, 0.408}, {0.848, 0.485}, {0.782, 0.834}, {0.475, 0.769}},
+            {{0.465, 0.462}, {0.618, 0.515}, {0.402, 0.781}, {0.222, 0.692}},
+            {{0.268, 0.414}, {0.448, 0.438}, {0.185, 0.71}, {0.025, 0.615}},
+        };
+        for (int i = 0; i < slotCorners.length; i++) {
+            ParkingSlot slot = new ParkingSlot("SLOT-loop1-" + (i + 1), 0, "A", i + 1);
+            double[][] c = slotCorners[i];
+            slot.setC1x(c[0][0]); slot.setC1y(c[0][1]);
+            slot.setC2x(c[1][0]); slot.setC2y(c[1][1]);
+            slot.setC3x(c[2][0]); slot.setC3y(c[2][1]);
+            slot.setC4x(c[3][0]); slot.setC4y(c[3][1]);
+            area.addParkingSlot(slot);
+        }
+        demoAreas.put("AREA-004", area);
+        demoLotKeys.put("AREA-004", "loop1");
+        demoCalibrated.put("AREA-004", true);
     }
 
     private ParkingArea buildDemoArea(String areaId, String areaName, String lotKey, int slotCount, int occupiedCount) {
@@ -534,7 +558,7 @@ public class DatabaseManager implements IParkingRepository {
         }
         try (PreparedStatement ps = connection.prepareStatement(
                 "INSERT INTO vehicles (vehicle_id, license_plate, vehicle_type, entry_time, exit_time, user_id) " +
-                "VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), exit_time = NULL")) {
+                "VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE entry_time = VALUES(entry_time), exit_time = VALUES(exit_time)")) {
             ps.setString(1, vehicle.getVehicleId());
             ps.setString(2, normalizePlate(vehicle.getLicensePlate()));
             ps.setString(3, vehicle.getVehicleType() != null ? vehicle.getVehicleType().name() : "CAR");
@@ -718,6 +742,47 @@ public class DatabaseManager implements IParkingRepository {
             System.err.println("getActiveSessionByPlate failed: " + e.getMessage());
         }
         return null;
+    }
+
+    @Override
+    public ParkingSession getLeavingOrActiveSessionByPlate(String normalizedPlate) {
+        if (useDemoData) {
+            return demoSessions.stream()
+                .filter(s -> s.isActiveOrLeaving() && s.getVehicle() != null && s.getVehicle().getLicensePlate() != null
+                    && normalizePlate(s.getVehicle().getLicensePlate()).equals(normalizedPlate))
+                .findFirst().orElse(null);
+        }
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT session_id, vehicle_id, slot_id, area_id, license_plate, entry_time, exit_time, status " +
+                "FROM parking_sessions WHERE license_plate = ? AND status IN ('ACTIVE','LEAVING') " +
+                "ORDER BY CASE status WHEN 'LEAVING' THEN 0 ELSE 1 END LIMIT 1")) {
+            ps.setString(1, normalizedPlate);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapSession(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("getLeavingOrActiveSessionByPlate failed: " + e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
+    public List<ParkingSession> getLeavingSessions() {
+        if (useDemoData) {
+            return demoSessions.stream()
+                .filter(ParkingSession::isLeaving)
+                .collect(java.util.stream.Collectors.toList());
+        }
+        List<ParkingSession> list = new ArrayList<>();
+        try (Statement stmt = connection.createStatement();
+             ResultSet rs = stmt.executeQuery(
+                 "SELECT session_id, vehicle_id, slot_id, area_id, license_plate, entry_time, exit_time, status " +
+                 "FROM parking_sessions WHERE status = 'LEAVING' ORDER BY entry_time DESC")) {
+            while (rs.next()) list.add(mapSession(rs));
+        } catch (SQLException e) {
+            System.err.println("getLeavingSessions failed: " + e.getMessage());
+        }
+        return list;
     }
     
     @Override

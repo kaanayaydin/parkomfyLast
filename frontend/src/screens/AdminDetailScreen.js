@@ -104,6 +104,17 @@ const AdminDetailScreen = ({ otopark, onBack }) => {
         <LiveCameraView lotKey={lotKey} height={220} label={`Canlı Kamera (${lotKey})`} />
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Giriş / Çıkış Kameraları</Text>
+        <Text style={styles.note}>Plaka tanıma canlı çalışır (kutu + plaka + güven skoru)</Text>
+        <View style={{ marginTop: 10 }}>
+          <LiveCameraView lotKey="giris" height={180} label="Giriş Kamerası" />
+        </View>
+        <View style={{ marginTop: 14 }}>
+          <LiveCameraView lotKey="cikis" height={180} label="Çıkış Kamerası" />
+        </View>
+      </View>
+
       {loading ? (
         <ActivityIndicator size="large" color="#1A237E" style={{ marginVertical: 24 }} />
       ) : live ? (

@@ -248,5 +248,7 @@ GÜNCELLEME LOGU (kısa satırlar — yeni işler buraya eklenir)
 2026-06-09 | Git push: develop-eren → origin (commit 42e60b5, 41 dosya).
 2026-06-09 | Rezervasyon: sıfır tolerans çakışma, reservation-view API, mobil zaman çizelgesi (SlotTimelineChart), canlı doluluk ayrı gösterim.
 2026-06-09 | Fix: canlı dolu slot rezerve edilemez; rezerve saatler çizelgede LIVE_RESERVED ile görünür; dolu slot seçilebilir (sadece görüntüleme).
+2026-06-09 | Git push: develop-eren (31d4577) rezervasyon timeline.
+2026-06-09 | Merge origin/kaan-dev → develop-eren: PaddleOCR, giriş/çıkış kameraları, AdminAuthFilter, benchmark/eval, kaan_journal.txt.
 
 ================================================================================

@@ -44,4 +44,21 @@ public interface IYOLOInference {
 
     /** Araç kırpımından plaka OCR (EasyOCR). */
     String detectLicensePlateFromCrop(byte[] vehicleCropJpeg, int slotNumber);
+
+    /** Araç kırpımından plaka OCR; metin + gerçek güven skoru. */
+    default PlateRead readPlateFromCrop(byte[] vehicleCropJpeg, int slotNumber) {
+        String text = detectLicensePlateFromCrop(vehicleCropJpeg, slotNumber);
+        return new PlateRead(text, (text == null || text.isBlank()) ? 0.0 : 1.0);
+    }
+
+    /** Plaka OCR sonucu: okunan metin + güven skoru (0-1). */
+    final class PlateRead {
+        public final String text;
+        public final double confidence;
+
+        public PlateRead(String text, double confidence) {
+            this.text = text;
+            this.confidence = confidence;
+        }
+    }
 }

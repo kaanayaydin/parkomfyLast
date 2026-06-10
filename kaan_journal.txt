@@ -1,0 +1,554 @@
+================================================================================
+KAAN_JOURNAL  -  Kaan'in AI Agent Calisma Gunlugu (Parkomfy Projesi)
+================================================================================
+Bu dosya, Kaan'in agent'i (Cursor AI) tarafindan bu projede yapilan tum
+calismalarin detayli ve kronolojik kaydidir. Her yeni guncellemede en alta
+yeni bir kayit eklenir. (Eren'in agent'i da kendi gunlugunu ayri tutacak.)
+
+Bicim: Her kayit -> [TARIH] Baslik / Ne yapildi / Neden / Etkilenen dosyalar.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+PROJE GENEL MIMARISI (referans)
+--------------------------------------------------------------------------------
+Parkomfy 3 ana bilesenden olusan bir otopark/plaka tanima sistemidir:
+
+  1) grpc_server/  : Python gRPC + Bilgisayarli Goru (CV) sunucusu (:50051)
+                     - YOLO (arac/slot tespiti), OCR (plaka okuma)
+                     - Kamera simulasyonu / RTSP kaynagi
+  2) src/main/java : Java Spring Boot backend (:8080)
+                     - REST API (frontend icin), gRPC istemcisi (Python'a)
+                     - Plaka takip, oturum/lifecycle, slot doluluk yonetimi
+  3) frontend/     : Expo / React Native mobil uygulama (:8081)
+                     - Giris/kayit, otopark durumu, rezervasyon, profil
+
+Iletisim: Frontend --REST--> Java --gRPC--> Python CV ; Java --HTTP--> kamera sim.
+
+
+================================================================================
+KRONOLOJIK KAYITLAR
+================================================================================
+
+--------------------------------------------------------------------------------
+[BASLANGIC] Projeyi calistirma ve GitHub'a tasima
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - Projenin nasil calistirilacagi incelendi (README, pom.xml, requirements.txt,
+   frontend/package.json). run.bat'in Windows'a ozel ve guncel yapiya uygun
+   olmadigi tespit edildi; macOS icin dogru calistirma komutlari verildi.
+ - Proje yeni bir ozel (private) GitHub reposu "parkomfyLast" altina pushlandi.
+ - Git is akisi anlatildi: arkadasin (Eren) branch'ini fetch/pull etme, local
+   degisiklikleri inceleme, gerektiginde stash/discard etme.
+Neden:
+ - Kullanici once projeyi ayaga kaldirmak ve surum kontrolu kurmak istedi.
+
+--------------------------------------------------------------------------------
+[DEBUG] "Spring Boot calismiyor olabilir" frontend hatasi
+--------------------------------------------------------------------------------
+Sorun:
+ - Backend ayakta olmasina ragmen frontend "Spring Boot calismiyor" uyarisi
+   veriyordu; parking/status 404 donuyordu.
+Kok neden:
+ - DatabaseManager bir placeholder'di; getArea() her zaman null donuyordu
+   (MySQL baglantisi/veri yoktu).
+Cozum:
+ - InMemoryParkingRepository olusturuldu (AREA-001/002/003 demo verisiyle).
+ - Spring bean (ParkomfySpringApplication) bu repoyu kullanacak sekilde ayarlandi
+   (daha sonra kullanici istegiyle DatabaseManager'a geri alindi).
+Etkilenen dosyalar:
+ - src/main/java/com/parkomfy/repository/InMemoryParkingRepository.java (yeni)
+ - src/main/java/com/parkomfy/ParkomfySpringApplication.java
+
+--------------------------------------------------------------------------------
+[DEBUG] Frontend hatalari (Expo)
+--------------------------------------------------------------------------------
+ - PluginError "@react-native-community/datetimepicker": eksik/eskimis node_modules.
+   Cozum: npm install + npx expo start -c.
+ - expo-notifications Android hatasi: Expo Go SDK 53+ Android'de push bildirimleri
+   kaldirildi. Cozum: frontend/src/config/notifications.js yeniden yazildi;
+   modul lazy yuklenir, Expo Go + Android'de init atlanir (iOS ve gercek build
+   etkilenmez).
+
+--------------------------------------------------------------------------------
+[OZELLIK] Turk plaka tanima sistemi - ilk surum (plan uygulamasi)
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - Demo/sahte OCR yerine gercek bir Turk plaka OCR pipeline'i kuruldu.
+ - Arac yasam dongusu tamamlandi: ENTERED -> PARKED -> LEAVING -> EXITED.
+ - Iki mod: giris/cikis icin yakin cekim, park icin tepeden gorus.
+Etkilenen dosyalar (Java):
+ - model/ParkingSession.java        : LEAVING durumu + isLeaving/isActiveOrLeaving
+ - util/PlateMatcher.java           : findBestMatch (bulanik eslestirme) + MatchResult
+ - service/DetectionService.java    : coklu-kare oylama, TR format dogrulama
+ - service/PlateTrackingService.java: processExit, handleSlotBecameEmpty
+ - service/OccupancySyncService.java: OCCUPIED->AVAILABLE gecisi LEAVING'e baglandi
+ - api/ParkingApiController.java     : processExitPlate
+ - controller/ParkingRestController : POST /api/v1/exit/plate
+ - api/ExitPlateResultDto.java      : cikis sonucu DTO (yeni)
+ - repository/IParkingRepository + DatabaseManager: LEAVING/aktif oturum sorgulari,
+   saveVehicle ON DUPLICATE KEY UPDATE exit_time
+Etkilenen dosyalar (Python):
+ - plate_reader.py    : plaka bolge tespiti + on isleme + EasyOCR + TR regex
+ - server.py          : DetectLicensePlate gercek guven skoru + plate_location
+ - camera_source.py   : CameraSource ABC, VideoFileSource, RtspSource (yeni)
+ - camera_simulator.py: yeni kamera kaynak katmanina uyarlandi
+ - eval_plates.py     : OCR dogruluk olcum scripti (yeni)
+
+--------------------------------------------------------------------------------
+[TEST] Mock fotograflarla OCR denemesi (plaka1.png, plaka2.png)
+--------------------------------------------------------------------------------
+Bulgu:
+ - EasyOCR + sezgisel lokalizasyon gercek fotograflarda zayif kaldi:
+   plaka1 (06 KES 78) -> "GKES78", plaka2 (50 UA 580) -> parcali "UA"/"580".
+ - Kok sorun tanima degil, kucuk plakayi yeterince iyi BULMA/yakinlastirma idi.
+ - Onemli not: plaka1'de "06"nin bas rakamini fiziksel olarak plaka cercevesi
+   kapatiyor; hicbir OCR bunu okuyamaz (pikselde yok).
+
+--------------------------------------------------------------------------------
+[KARAR/KAVRAM] Egitim gerekmiyor - OCR motorlari hazir gelir
+--------------------------------------------------------------------------------
+ - Kullanicinin sorusu uzerine netlestirildi: EasyOCR/PaddleOCR gibi OCR motorlari
+   ONCEDEN EGITILMIS gelir, metni egitim olmadan tanir. Bizim eksigimiz tanima
+   degil, kucuk plakayi iyi yakalamakti.
+
+--------------------------------------------------------------------------------
+[IYILESTIRME] PaddleOCR entegrasyonu (ana OCR motoru)
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - PaddleOCR (mobile det+rec modelleri) ana OCR motoru olarak plate_reader.py'a
+   eklendi. EasyOCR fallback olarak korundu (PARKOMFY_OCR_BACKEND=easyocr ile
+   elle de secilebilir). Fonksiyon imzalari DEGISMEDI -> Java/gRPC tarafi kirilmadi.
+ - requirements.txt'e paddleocr + paddlepaddle eklendi.
+ - Egitim YOK; modeller bir kez ~/.paddlex altina indi (cache).
+Test sonuclari (CPU):
+ - plaka2.png (50 UA 580) -> "50UA580" guven 0.96, ~205 ms  [BIREBIR DOGRU]
+ - plaka1.png (06 KES 78) -> "15KES78" guven 0.88, ~240 ms  [KES78 dogru, 06 kapali]
+Etkilenen dosyalar:
+ - grpc_server/plate_reader.py  (PaddleOCR backend, _paddle_pipeline, _poly_to_norm)
+ - grpc_server/requirements.txt
+
+--------------------------------------------------------------------------------
+[TEST] Video uzerinden uctan uca deneme (otopark_giris_video.mp4)
+--------------------------------------------------------------------------------
+Video: 1920x1080, 30 fps, 75 sn. Giris kamerasi senaryosu (beyaz Renault Clio).
+Yontem: ~2 kare/sn ornekleme + coklu-kare oylama.
+Sonuc:
+ - FINAL plaka: "34 EZS 794" -> 43 karede tutarli, ortalama guven 0.97 [DOGRU].
+ - Arac uzaktayken birkac gurultulu kare (34EZS199/34EZS19) oylama ile elendi.
+Hiz optimizasyonu:
+ - OCR oncesi 1280px ust-sinir kucultme eklendi (PARKOMFY_OCR_MAX_WIDTH).
+   1080p kare: 1019 ms -> 668 ms, dogruluk korunur. 1280 alti plaka cok kuculup
+   okunamiyor (960/720'de basarisiz), bu yuzden varsayilan 1280.
+Etkilenen dosyalar:
+ - grpc_server/plate_reader.py  (_OCR_MAX_WIDTH downscale)
+
+--------------------------------------------------------------------------------
+[CIKTI] Annotasyonlu demo video uretimi
+--------------------------------------------------------------------------------
+Ne yapildi:
+ - otopark_giris_video.mp4 islenerek, tespit edilen plaka yesil kutu icine alindi
+   ve kutunun yanina plaka metni + guven skoru (% olarak) yazildi.
+ - Cikti: otopark_giris_annotated.mp4 (proje kok dizini).
+ - OCR her 5 karede bir calisir, tespit ~1 sn ekranda tutulur (akici gorunum).
+
+--------------------------------------------------------------------------------
+[ALTYAPI] Bu gunluk dosyasi olusturuldu (kaan_journal.txt)
+--------------------------------------------------------------------------------
+ - Kullanici istegiyle, agent'in projedeki tum calismalarini kayit altina almak
+   icin bu dosya olusturuldu. Bundan sonra her guncellemede buraya ekleme yapilacak.
+
+--------------------------------------------------------------------------------
+[TEST] Kisaltilmis video ile tekrar deneme + annotasyon
+--------------------------------------------------------------------------------
+ - Kullanici otopark_giris_video.mp4'u ayni isimle KISA versiyonla degistirdi
+   (75 sn -> 7.1 sn, 213 kare, 1920x1080).
+ - Tekrar islendi: plaka "34 EZS 794" 42 karede tutarli okundu, ort. guven 0.96.
+ - Annotasyonlu cikti yeniden uretildi: otopark_giris_annotated.mp4 (172 kare,
+   ~21 MB). Yesil kutu + "34 EZS 794 %99" etiketi dogru gorunuyor.
+ - Kisa video sayesinde uretim cok hizli (onceki 239 MB yerine 21 MB dosya).
+
+--------------------------------------------------------------------------------
+[DUZELTME] Video codec sorunu (Cursor/tarayicida acilmiyordu)
+--------------------------------------------------------------------------------
+Sorun:
+ - OpenCV VideoWriter 'mp4v' (MPEG-4 Part 2) ile yaziyordu; Cursor/tarayici
+   oynaticisi H.264 ister, bu yuzden "error loading video file" veriyordu.
+Cozum:
+ - Video H.264 ('avc1' fourcc) ile yeniden kodlandi. Boyut 21 MB -> 5.5 MB.
+ - NOT (gelecek): annotasyonlu video uretirken bastan 'avc1' kullan, 'mp4v' degil.
+
+--------------------------------------------------------------------------------
+[GIT] Eren'in develop-eren branch'i kaan-dev'e merge edildi
+--------------------------------------------------------------------------------
+Durum:
+ - Eren origin/develop-eren'e taze gelistirmeler pushlamis (41 dosya, +2154/-698):
+   coklu-otopark kamera simulasyonu, admin paneli, hybrid_occupancy, rezervasyon
+   ekranlari, DatabaseManager genislemeleri, vb. + kendi eren_journal.txt'i.
+Akis:
+ 1) Once kaan-dev'deki tum local calisma commit'lendi (7b25a03) -> temiz agac.
+ 2) git merge origin/develop-eren yapildi.
+ 3) 7 dosya ortakti; 5'i otomatik birlesti, 2'sinde gercek cakisma cikti:
+    - OccupancySyncService.java: iki taraf birlestirildi -> slot bosalinca
+      oturum hem LEAVING'e gecer (kaan) hem exit_time set edilir (eren), sonra
+      slot bosaltilir (eren'in genis kosuluyla).
+    - camera_simulator.py: Eren tamamen yeni multi-lot mimariye gecirmis;
+      Eren'in versiyonu alindi. RTSP yetenegi camera_source.py'da duruyor
+      (cakisma yok), yeni mimariye baglamak GELECEK is olarak birakildi.
+ 4) Dogrulama: mvn clean compile -> BUILD SUCCESS (100 java dosyasi);
+    python import camera_simulator/plate_reader/camera_source/server -> OK.
+ 5) Merge commit: 6d4fd17.
+Sonuc:
+ - kaan-dev artik hem benim OCR/lifecycle isimi hem Eren'in tum gelistirmelerini
+   iceriyor, derleniyor. Henuz remote'a pushlanmadi (kullanici istegiyle).
+GELECEK NOT:
+ - camera_source.py RTSP kaynagini Eren'in yeni multi-lot CameraSimulator
+   yapisina entegre et (start_all_cameras / get_stream modeli).
+
+--------------------------------------------------------------------------------
+[OZELLIK] Frontend'e canli Giris/Cikis kamera bolmesi (annotated)
+--------------------------------------------------------------------------------
+Istek:
+ - Her otopark ekraninin altinda canli giris ve cikis kameralari gorunsun;
+   simdilik mock videolarla (otopark_giris_video.mp4 / otopark_cikis_v.mp4),
+   goruntuler annotated olsun (plaka kutusu + metin + guven skoru).
+Yapilanlar:
+ 1) Python camera_simulator.py:
+    - AnnotatedCameraSimulator sinifi eklendi (CameraSimulator'dan turer).
+      Arka planda throttle'li OCR worker (~0.8s) son tespiti cache'ler;
+      oynatma dongusu her kareye yesil kutu + plaka + %guven cizer. OCR yavas
+      oldugu icin oynatma akici kalir. _ocr_lock ile PaddleOCR cagrilari
+      seri hale getirildi (giris+cikis ortak reader).
+    - "giris"->otopark_giris_video.mp4, "cikis"->otopark_cikis_v.mp4 eslemesi
+      (_SPECIAL_VIDEOS, _normalize_lot, _resolve_video_path).
+    - start_all_cameras: loop1/2/3'e ek olarak giris+cikis annotated stream.
+ 2) Java CameraSimulationService.normalizeLotKey: "giris"/"cikis" (ve
+    entry/exit) artik "loop" oneki almadan gecer -> proxy dogru lot'a gider.
+ 3) Frontend SlotSelectionScreen.js: slot grid altina "Giris / Cikis
+    Kameralari" bolmesi; iki LiveCameraView (lotKey="giris" ve "cikis").
+Dogrulama:
+ - mvn compile -> OK. Python: 5 stream basladi (loop1/2/3, giris, cikis).
+ - GIRIS kamerasi: "34 EZS 794" %96 ile annotated kare uretildi [BASARILI].
+ - CIKIS kamerasi: stream canli ve kare uretiyor ANCAK saglanan video
+   640x352 ve arac UZAKTA -> plaka cok kucuk, OCR okuyamiyor (86 karenin
+   hicbirinde gecerli plaka yok). Yapi dogru; bu videonun cozunurluk/mesafe
+   sinirindan annotation kutusu cikmiyor.
+GELECEK NOT:
+ - Cikis icin plakanin yakin/buyuk goruldugu bir video konursa kutu otomatik
+   cikar (kod hazir). Alternatif: cikis icin OCR esigini dusurmek riskli
+   (yanlis okuma) - onerilmez.
+
+--------------------------------------------------------------------------------
+[NOT] Cikis videosu: gecici olarak giris videosu kullaniliyor
+--------------------------------------------------------------------------------
+ - Kullanici yeni bir cikis videosu (otopark_cikis_v.mp4 v2, 1080p) koydu fakat
+   video YATAY AYNALANMIS cikti (TEKNOPALAS logosu ve plaka ters); OCR okuyamadi
+   (cv2.flip(fr,1) ile cevirince 34EZS794 %98 okundu - dogrulandi).
+ - Kullanici istegiyle simdilik cikis kamerasi da GIRIS videosunu kullaniyor:
+   camera_simulator.py _CIKIS_VIDEO = "otopark_giris_video.mp4".
+ - Dogrulama: giris ve cikis stream'leri ikisi de "34 EZS 794" annotated
+   uretiyor (0.93 / 0.96).
+ - GELECEK: gercek (aynalanmamis) cikis videosu gelince _CIKIS_VIDEO'yu degistir;
+   istenirse aynalanmis videolar icin stream'e opsiyonel flip eklenebilir.
+
+--------------------------------------------------------------------------------
+[DUZELTME] Giris/Cikis kamera bolmesi ADMIN ekranina da eklendi
+--------------------------------------------------------------------------------
+ - Kullanici bolmeyi bulamadi: cunku yonetici (admin) panelinden giriyor ve
+   AdminDetailScreen'i goruyor; bolme ise sadece kullanici SlotSelectionScreen'e
+   eklenmisti.
+ - AdminDetailScreen.js: "Canli Otopark Kamerasi" kartinin hemen altina
+   "Giris / Cikis Kameralari" karti eklendi (iki LiveCameraView: giris + cikis).
+ - Artik hem admin (AdminDetailScreen) hem kullanici (SlotSelectionScreen)
+   tarafinda gorunuyor.
+
+--------------------------------------------------------------------------------
+[DUZELTME] Sadece admin'de kalsin + siyah ekran (kare boyutu) cozumu
+--------------------------------------------------------------------------------
+ - Kullanici istegi: giris/cikis kameralari SADECE yonetici panelinde kalsin.
+   -> SlotSelectionScreen.js'ten bolme/import/style geri alindi (revert).
+   -> Sadece AdminDetailScreen'de duruyor.
+ - SIYAH EKRAN sorunu teshis: backend kusursuz calisiyordu (Java proxy giris
+   icin HTTP 200, annotated 1920x1080 kare donuyordu) AMA kare ~390KB idi;
+   loop1 ise 848x478/~58KB. LiveCameraView ~120ms'de (8fps) cache-bust ile
+   kare istiyor; telefon 390KB'lik kareyi o surede indiremeyince <Image> hic
+   tamamlanmiyor -> siyah.
+   COZUM: AnnotatedCameraSimulator servis karesini _SERVE_WIDTH=960'a kuculttu
+   + JPEG kalite 80. OCR hala TAM cozunurlukte calisir (dogruluk korunur),
+   sadece gosterilen kare kuculur. Sonuc: 960x540 ~118KB (loop1 seviyesinde).
+ - DONGU: video bitince bastan baslar (zaten _play_loop disinda while ile
+   surekli yeniden aciliyor) - canli akis gibi sonsuz dongu.
+ - NOT: degisiklik Python'da; calisani gormek icin server.py yeniden baslat.
+
+--------------------------------------------------------------------------------
+[DUZELTME] Siyah ekran v2: Android titreme + giris/cikis hic yuklenmiyor
+--------------------------------------------------------------------------------
+Gozlem (kullanici):
+ - Android: loop1 bile frame frame siyah gelip gidiyor (titreme); giris/cikis
+   tamamen siyah.
+ - iPhone: loop1 akiyor; giris/cikis IKISINDE DE tamamen siyah.
+Teshis:
+ - LiveCameraView her ~120ms Image source.uri'yi degistiriyordu -> Android'de
+   yeniden yukleme sirasinda siyah caker (bilinen RN davranisi).
+ - Ekranda 3 kamera ayni anda 8fps istek atinca giris/cikis (daha buyuk kare)
+   bir kez bile tam yuklenemeden uri degisiyor -> hep siyah.
+Cozum:
+ 1) LiveCameraView.js CIFT TAMPONLU yeniden yazildi: gizli <Image> ile sonraki
+    kare on-yuklenir, TAM yuklenince (onLoad) gosterilen kareye terfi eder;
+    kareler teker teker istenir (onLoad/onError -> queueNext). Boylece son iyi
+    kare hep ekranda kalir (siyah yok) ve cihaz hizina gore kendini ayarlar.
+    fadeDuration=0 ile Android fade-flicker kapatildi.
+ 2) Giris/cikis servis karesi hafifletildi: _SERVE_WIDTH 960->768, JPEG q 80->72
+    -> ~62KB (loop1 ~58KB seviyesinde). Calisan loop1 iOS'ta sorunsuz oldugundan
+    bu boyut da yuklenir.
+Yansitmak icin: Python server.py yeniden baslat + Expo'da 'r' (reload).
+
+--------------------------------------------------------------------------------
+[DUZELTME] Siyah ekran v3: expo-image'e gecis (RN Image yetersiz)
+--------------------------------------------------------------------------------
+Gozlem: Python yeniden baslatildi, giris/cikis artik 65KB (loop1 ile AYNI boyut,
+ ayni endpoint) ama telefonda hala siyah + spinner; loop1 calisiyor. Yani sorun
+ boyut/backend degil -> RN Image'in 3 es zamanli polling akisini kaldiramamasi.
+Cozum:
+ - LiveCameraView RN Image yerine expo-image (zaten kurulu, SDK54) ile yeniden
+   yazildi. expo-image kaynak degisince son kareyi tutar (siyah yok), decode/
+   bellek yonetimi daha iyi -> 3 kamera ayni anda yuklenebiliyor. Kareler teker
+   teker istenir (onLoad/onError -> scheduleNext), cachePolicy=none, transition=0.
+ - Sadece frontend degisikligi; Expo'da 'r' (reload) yeterli, Python/Java restart
+   GEREKMEZ.
+ - Backend tarafi onceki adimdan: giris/cikis 768px q72 ~65KB (loop1 seviyesi).
+
+--------------------------------------------------------------------------------
+[IYILESTIRME] OCR yuku azaltildi (servis tikanmasini onlemek icin)
+--------------------------------------------------------------------------------
+Kullanici hipotezi: arka planda surekli OCR calismasi giris/cikis goruntusunu
+ etkiliyor olabilir mi? -> Hakli olabilir: PaddleOCR agir, Python GIL'i yuzunden
+ OCR calisirken ayni stream'in kare servisi yavaslayabilir.
+Yapilanlar (camera_simulator.py AnnotatedCameraSimulator):
+ - ocr_interval 0.8s -> 1.6s (yari sikligi).
+ - OCR'a verilen kare 900px'e kucultuldu: per-call 630ms -> 384ms (dogruluk
+   korunur, 34EZS794 %96). Net OCR CPU yuku ~3-4x dustu.
+ - _DET_TTL 2.0s -> 3.5s: OCR seyrek calissa da kutu ekranda kalir.
+NOT: Expo terminalinde "No apps connected, reload failed" -> 'r' reload telefona
+ ULASMAMIS olabilir; uygulamayi yeniden baglamak (QR/yeniden ac) gerekiyor.
+ Bu OCR degisikligi icin Python server.py yeniden baslatilmali.
+
+--------------------------------------------------------------------------------
+[ASIL SORUN BULUNDU] Tek-thread'li HTTP sunucusu -> ThreadingHTTPServer
+--------------------------------------------------------------------------------
+Tani: curl ile test -> loop1/giris/cikis HEPSI HTTP 200, ~60-65KB, gecerli
+ parlak kareler (mean 89/113/113), siyah DEGIL. Yani backend kareleri uretiyor.
+Gercek sebep: camera_simulator.py HTTP sunucusu HTTPServer (TEK THREAD).
+ Admin ekraninda eskiden tek kamera vardi -> sorunsuz. Simdi 3 kamera (otopark
+ + giris + cikis) ayni anda ~120ms'de bir istek atiyor; tek-thread'li sunucu
+ istekleri SIRAYA sokuyor, OCR de GIL tutunca giris/cikis istekleri ac kaliyor
+ -> telefonda siyah ekran. loop tek basina oldugu icin calisiyordu.
+Cozum: HTTPServer -> ThreadingHTTPServer (daemon_threads=True). Eszamanli
+ snapshot istekleri artik paralel karsilaniyor.
+ -> Python server.py yeniden baslatilmali.
+
+--------------------------------------------------------------------------------
+[UX DEGISIKLIGI] Giris/Cikis: ayni ekranda 3 kamera yerine buton + ayri sayfa
+--------------------------------------------------------------------------------
+Kullanici karari: 3 goruntu ayni ekranda olmuyor; o yuzden AdminDetailScreen'de
+ 2 buton (Giris Kamerasi / Cikis Kamerasi) olsun, tiklayinca tek-kamera tam
+ ekran gorunume gecsin. Boylece ayni anda SADECE 1 stream akar (otopark loop1
+ ana ekranda + secilince tek giris/cikis). Eszamanlilik sorunu tamamen biter.
+Yapilanlar (AdminDetailScreen.js):
+ - Inline giris/cikis LiveCameraView'lari kaldirildi; yerine 2 buton kondu
+   (yesil Giris, kirmizi Cikis).
+ - activeCamera state'i (null|giris|cikis). Set olunca render basinda erken
+   donus ile tam ekran tek LiveCameraView (height 300) + "Kameralara don".
+ - Ana ekranda artik sadece loop1 kamerasi akar (tek stream).
+ - App.js navigasyonuna dokunulmadi (yerel state ile cozuldu).
+Not: Backend ThreadingHTTPServer + OCR azaltma degisiklikleri de yerinde duruyor
+ (tek kamera akarken de fayda saglar).
+
+--------------------------------------------------------------------------------
+[GERI DONUS] LiveCameraView expo-image yerine RN Image + yavas polling
+--------------------------------------------------------------------------------
+Kullanici sonucu: tek kamera sayfasinda da siyah ekran devam ediyor.
+Test: Java endpoint'leri de saglam:
+ - /api/v1/camera/live/snapshot?lot=loop1 -> HTTP 200 ~62KB
+ - /api/v1/camera/live/snapshot?lot=giris -> HTTP 200 ~57KB
+ - /api/v1/camera/live/snapshot?lot=cikis -> HTTP 200 ~56KB
+Yani backend ve Java proxy kare donduruyor. Sorun buyuk ihtimalle frontend
+ render/load tarafinda.
+Yapilanlar:
+ - LiveCameraView.js expo-image denemesi birakildi.
+ - React Native Image'a geri donuldu.
+ - Tek kamera icin polling 650ms yapildi (istek yigilmamasi icin).
+ - key={uri} ile her kare net yeniden mount ediliyor.
+ - onError sayaci eklendi: ilk frame yuklenemezse ekranda
+   "Goruntu yuklenemiyor (n)" gosterir.
+Sonraki testte bu sayac artarsa telefon HTTP image load edemiyor; sayac yok ama
+ siyahsa image decode/render veya goruntunun kendisi incelenecek.
+
+--------------------------------------------------------------------------------
+[KOK SEBEP] Yanlis API IP -> ERR_ADDRESS_UNREACHABLE
+--------------------------------------------------------------------------------
+Kullanici tarayicida test: http://192.168.1.101:8080/... -> ERR_ADDRESS_UNREACHABLE.
+Uygulamada "Goruntu yuklenemiyor (n)" sayaci artiyor -> Image onError, HTTP ulasamiyor.
+Gercek durum:
+ - Expo Metro: exp://192.168.1.127:8081
+ - Spring Boot calisiyor: 127.0.0.1:8080 ve 192.168.1.127:8080 -> HTTP 200
+ - 192.168.1.101:8080 -> unreachable (eski/sabit IP, agda yok)
+frontend/src/config/api.js API_HOST_OVERRIDE='192.168.1.101' sabit yaziliydi.
+Cozum:
+ - API_HOST_OVERRIDE=null; Expo debugger host otomatik (192.168.1.127).
+ - application.properties: server.address=0.0.0.0 (LAN erisimi).
+Kullanici: Expo reload + Spring Boot restart. Tarayicida dogru URL:
+ http://192.168.1.127:8080/api/v1/camera/live/snapshot?lot=giris
+Admin ekraninda alt satirda IP 192.168.1.127 gorunmeli.
+
+--------------------------------------------------------------------------------
+[KOK SEBEP-2] Restart sonrasi otoparklar siliniyor (MySQL kapali)
+--------------------------------------------------------------------------------
+Belirti: IP duzeldi, tarayicida goruntu geldi; ama kayitli otoparklar gitti.
+ curl /parking/areas ve /admin/parking-areas -> data: [] (bos).
+Tani: MySQL 3306 KAPALI -> DatabaseManager in-memory demo moda dusuyor.
+ seedDemoAreas() BOS idi ("admin panelden olusturulur"). Admin panelden
+ eklenen otoparklar sadece bellekte -> her Spring Boot restart'inda siliniyor.
+ Debug icin surekli restart istedigimden tekrar tekrar yasandi.
+Cozum (DatabaseManager.seedDemoAreas):
+ - 3 hazir otopark tohumlandi (buildDemoArea + demoAreas/demoLotKeys/
+   demoCalibrated): AREA-001 loop1 (12/5), AREA-002 loop2 (10/3),
+   AREA-003 loop3 (8/2). Hepsi calibrated=true -> public listede gorunur.
+ - MySQL acilinca (ensureConnection) bu seed devre disi, gercek DB kullanilir.
+ - mvn compile OK.
+Kalici cozum istenirse: MySQL'i baslat (brew services start mysql) — o zaman
+ admin panelden eklenenler restart'a dayanir.
+Kullanici: Spring Boot'u yeniden baslat -> 3 otopark gelir.
+
+--------------------------------------------------------------------------------
+[IYILESTIRME] Kameralar geldi -> FPS artirildi
+--------------------------------------------------------------------------------
+Kullanici: kameralar artik geliyor, frame/boyut sorun degilmis, fps artirilsin.
+Yapilan (LiveCameraView.js): polling intervalMs 650 -> 200 (~1.5fps -> ~5fps).
+ Tek kamera gorunumu oldugu icin telefon rahat kaldirir. Sadece Expo reload
+ yeterli (backend degisikligi yok).
+
+--------------------------------------------------------------------------------
+[GERI ALMA + DOGRU SEED] 200ms cok agresif + Eren'in gercek otoparki
+--------------------------------------------------------------------------------
+Kullanici: 200ms'de yine siyah/takilma; cozunurluk dusur. Ayrica benim
+ olusturdugum jenerik 3 otopark (AREA-001/002/003 12/10/8 slot) yanlis; Eren'in
+ videodaki slot sayisina gore ayarladigi eski otopark geri gelsin, IP korunsun.
+Bulgu: MySQL bu makinede HIC KURULU DEGIL (mysql/mysqld not found). Yani Eren'in
+ otoparklari diskte DB'de degildi; calisan Spring Boot'un BELLEGINDEYDI ve IP
+ fix icin restart edince silindi. Ben bir DB silmedim - DB zaten yoktu.
+ ANCAK Eren'in kalibrasyonu diskte: grpc_server/calibrations/AREA-004.json
+ -> AREA-004, loop1, 3 slot, poligon koseleri (848x478).
+Yapilanlar:
+ - DatabaseManager.seedDemoAreas: jenerik 3 otopark KALDIRILDI. Yerine tam
+   AREA-004 (loop1, 3 slot SLOT-loop1-1/2/3, JSON'daki kose koordinatlariyla,
+   calibrated=true) tohumlandi. Eski hal geri geldi. mvn compile OK.
+ - LiveCameraView.js: polling 200 -> 650 geri alindi (200 zayif Android'de
+   siyah/takilma yapiyordu; 650 stabil calisiyordu).
+ - camera_simulator.py: giris/cikis _SERVE_WIDTH 768 -> 640 (cozunurluk biraz
+   dusuruldu, daha az takilma).
+ - api.js IP fix (override=null) KORUNDU.
+Yeniden baslat: Spring Boot (seed) + Python (serve width) + Expo reload (polling).
+
+--------------------------------------------------------------------------------
+[UX GERI ALMA + TAKILMA FIX] Giris/cikis tekrar sayfa icinde + double buffer
+--------------------------------------------------------------------------------
+Kullanici: asil sorun IP'ymis (eszamanlilik degil), o yuzden giris/cikis
+ videolarini eski hali gibi otopark sayfasinin icine geri koy; takilmayi da
+ biraz daha duzelt.
+Yapilanlar:
+ - AdminDetailScreen.js: 2 buton + ayri tek-kamera sayfasi KALDIRILDI. Giris ve
+   Cikis tekrar sayfaya gomulu LiveCameraView (height 180) olarak eklendi
+   (loop1 ana kamera + giris + cikis = 3 stream ayni sayfada).
+   activeCamera state ve camBtn stilleri temizlendi.
+ - LiveCameraView.js: DOUBLE BUFFER'a gecildi (RN Image, 2 katman).
+   * baseUri = ekranda kalan son kare; topUri = arka planda yuklenen yeni kare.
+   * top yuklenince base'e terfi eder -> kareler arasi siyah/flicker yok.
+   * Zincirleme polling: sonraki istek onceki yuklendikten intervalMs sonra
+     (350ms). key={uri} kaldirildi (remount->siyah sorununu cozer).
+   * fadeDuration=0.
+ - 3 stream ayni anda: backend ThreadingHTTPServer + 640px + OCR throttle ile
+   destekleniyor.
+Sadece Expo reload yeterli (LiveCameraView + AdminDetailScreen frontend).
+Python serve width (640) ve Spring seed (AREA-004) onceki adimdan; degismediyse
+ tekrar baslatmaya gerek yok.
+
+--------------------------------------------------------------------------------
+[OLCUM ARACLARI] Performans metrikleri (latency/FPS/accuracy/precision-recall)
+--------------------------------------------------------------------------------
+Amac: rapordaki accuracy/precision/recall/latency/FPS iddialarini kanitlamak.
+Eklenen dosyalar (grpc_server/):
+ - benchmark.py: OTOMATIK latency + FPS (etiket gerekmez). OCR ve slot doluluk
+   icin videodan kare ornekler, mean/median/p95/min/max ms + FPS raporlar.
+ - eval_slots.py: slot precision/recall/F1/accuracy. 'predict' videodan tahmin
+   CSV'si uretir; 'truth_occupied' elle doldurulur; 'score' confusion matrix +
+   metrik hesaplar. Pozitif sinif=DOLU. AREA-004 kalibrasyonu kullanir.
+ - eval_plates.py: (zaten vardi) OCR accuracy; --dir gorseller + --labels CSV.
+ILK GERCEK OLCUM (benchmark.py -n 20, CPU, GPU yok):
+ - Slot doluluk (AREA-004, loop1): mean 29.3 ms -> ~34 FPS, 3 slot. SAGLAM.
+ - Plaka OCR (giris video tam kare 1920px): mean 1144 ms (~0.9 FPS),
+   13/18 karede plaka okundu. NOT: annotated stream 900px'e kuculttugu icin
+   gercekte ~384 ms (~2.6 FPS) - bkz onceki _ocrspeed olcumu.
+Kullanim:
+  ./.venv/bin/python benchmark.py -n 30
+  ./.venv/bin/python eval_slots.py predict --video ../loop1.mp4 --n 20 \
+       --save-frames eval_frames --out slots_pred.csv   # sonra truth doldur
+  ./.venv/bin/python eval_slots.py score --csv slots_pred.csv
+  ./.venv/bin/python eval_plates.py --dir test_plates --labels labels.csv
+
+================================================================================
+SON DURUM OZETI (guncel)
+================================================================================
+ - OCR: PaddleOCR (mobile) ana motor, EasyOCR fallback. TR plaka dogrulama aktif.
+ - Performans: 1280px kucultme ile ~670 ms/kare (1080p), ~205 ms (kucuk goruntu).
+ - Dogrulanan plakalar: 50 UA 580 (foto), 34 EZS 794 (video) - dogru.
+ - Java lifecycle (ENTERED->PARKED->LEAVING->EXITED) ve /exit/plate ucu hazir.
+ - Henuz git'e pushlanmadi (kullanici istegiyle bekletiliyor).
+ - Gelecek: videoyu kamera simulatorune baglayip uctan uca giris->bariyer akisi;
+   istege bagli egitilmis plaka-tespit YOLO modeli; gercek RTSP kamera.
+================================================================================
+
+== Overhead OCR: sahte plaka fallback'i kaldirildi (gercek OCR + guven esigi) ==
+ - IYOLOInference: PlateRead (metin + guven) ve readPlateFromCrop() eklendi.
+ - YOLOInference: readPlateFromCrop gercek gRPC guven skorunu dondurur.
+ - OccupancySyncService.assignPlateFromHybridDetection: artik PlateSimulationService
+   ile sahte plaka (34 PGZ 545 / 67 ACP 810) ATAMIYOR. Arac kirpimini gercek OCR ile
+   okur; plaka gecerli VE guven >= MIN_PLATE_CONF (0.55) ise gercek plakayi atar.
+   Okuyamazsa slot DOLU kalir, plaka bos; her sync karesinde tekrar denenir (arac
+   netlesince gercek plaka otomatik yazilir).
+ - Test (loop1 kareleri): one donuk siyah arac 67 ACP 810 -> %97-99 gercek okuma.
+   Acili/uzak beyaz arac (34 PGZ 545) -> cogu karede okunamiyor (fiziksel limit).
+ - PlateSimulationService.assignPlateToOccupiedSlot artik kullanilmiyor (dead code,
+   getOrCreateVehicle ve seed hala kullaniliyor). Java temiz derlendi.
+================================================================================
+
+== Madde 8 (Testler) + Madde 10 (Guvenlik/KVKK) ==
+ - pom.xml: maven-surefire-plugin + spring-security-crypto (BCrypt).
+ - src/test/java: PlateMatcherTest, PricingPolicyTest, AuthServiceTest (mvn test yesil).
+ - AuthService: BCrypt hash + legacy SHA-256 uyumluluk; login token (UUID) uretimi.
+ - AdminAuthFilter: /api/v1/admin/* icin X-Auth-Token zorunlu (ADMIN rolu).
+ - UserDto.token; ParkomfySpringApplication FilterRegistrationBean + env MYSQL_*.
+ - DatabaseManager admin seed: PARKOMFY_ADMIN_PASSWORD env (default 1234).
+ - LegalRestController: GET /api/v1/legal/kvkk aydinlatma metni.
+ - frontend api.js: setAuthToken, authHeaders, admin cagrilarina token; getKvkkText.
+ - RegisterScreen: KVKK onay kutusu + modal; kayit icin zorunlu.
+ - static admin.js: sessionStorage token + admin login prompt.
+ - SECURITY.md: yapilanlar + TLS/tam yetkilendirme gelecek is notu.
+================================================================================
+
+== Akici kamera: MJPEG akisi + dengeli kalite ==
+ - Java: proxyMjpegStream(lotKey) -> /live.mjpg?lot=; GET /camera/live/stream?lot=
+ - Python: CameraSimulator _SERVE_WIDTH=960 q80; Annotated 960 q80; MJPEG sleep 0.05 (~20fps).
+ - frontend: react-native-webview; getLiveCameraStreamUrl(); LiveCameraView WebView MJPEG.
+ - app.json: android usesCleartextTraffic=true (LAN HTTP stream).
+ - Snapshot endpoint korundu (OccupancySync + web admin).
+================================================================================
+
+== GERI ALINDI: MJPEG (WebView'de ekranlar yine simsiyah oldu) ==
+ - LiveCameraView.js: snapshot polling double-buffer haline donduruldu (intervalMs=350).
+ - camera_simulator.py: Annotated 640/q72, base full-res q82, MJPEG sleep 0.08.
+ - Java: proxyMjpegStream lot parametresi ve /camera/live/stream?lot= geri alindi.
+ - app.json usesCleartextTraffic kaldirildi; api.js getLiveCameraStreamUrl kaldirildi.
+ - react-native-webview kaldirildi (npm uninstall).
+ - Karar: dusuk fps snapshot yontemi korunuyor, kamera akiciligi gelistirilmeyecek.
+================================================================================

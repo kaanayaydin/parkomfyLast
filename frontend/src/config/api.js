@@ -6,7 +6,9 @@ import { Platform } from 'react-native';
  * Expo Go on a physical device cannot reach "localhost" (that is the phone itself).
  * Use the dev machine IP from Expo's debugger host, or set API_HOST_OVERRIDE below.
  */
-const API_HOST_OVERRIDE = '192.168.1.101';
+// Sabit IP yazmayın; Wi-Fi değişince telefon sunucuya ulaşamaz (ERR_ADDRESS_UNREACHABLE).
+// Gerekirse geçici olarak buraya yazın, yoksa Expo'nun debugger host'unu kullanır.
+const API_HOST_OVERRIDE = null;
 
 function resolveApiHost() {
   if (API_HOST_OVERRIDE) return API_HOST_OVERRIDE;
@@ -22,12 +24,26 @@ function resolveApiHost() {
     return debuggerHost.split(':')[0];
   }
 
-  return '192.168.1.101';
+  return 'localhost';
 }
 
 export const API_HOST = resolveApiHost();
 export const API_BASE = `http://${API_HOST}:8080/api/v1`;
 export const WS_URL = `ws://${API_HOST}:8080/ws/parking`;
+
+let authToken = null;
+
+export function setAuthToken(token) {
+  authToken = token || null;
+}
+
+function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (authToken) {
+    headers['X-Auth-Token'] = authToken;
+  }
+  return headers;
+}
 
 export const AREA_IDS = {
   istasyon1: 'AREA-001',
@@ -189,6 +205,15 @@ export async function loginUser(email, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
+  const json = await res.json();
+  if (json.success && json.data?.token) {
+    setAuthToken(json.data.token);
+  }
+  return json;
+}
+
+export async function getKvkkText() {
+  const res = await fetch(`${API_BASE}/legal/kvkk`);
   return res.json();
 }
 
@@ -272,17 +297,23 @@ export async function registerPushToken(userId, expoPushToken) {
 export async function getAdminReservations(areaId) {
   let url = `${API_BASE}/admin/reservations`;
   if (areaId) url += `?areaId=${encodeURIComponent(areaId)}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeaders() });
   return res.json();
 }
 
 export async function getAdminSessions(areaId) {
-  const res = await fetch(`${API_BASE}/admin/sessions?areaId=${encodeURIComponent(areaId)}`);
+  const res = await fetch(
+    `${API_BASE}/admin/sessions?areaId=${encodeURIComponent(areaId)}`,
+    { headers: authHeaders() }
+  );
   return res.json();
 }
 
 export async function getAdminDetections(areaId) {
-  const res = await fetch(`${API_BASE}/admin/detections?areaId=${encodeURIComponent(areaId)}`);
+  const res = await fetch(
+    `${API_BASE}/admin/detections?areaId=${encodeURIComponent(areaId)}`,
+    { headers: authHeaders() }
+  );
   return res.json();
 }
 
@@ -308,7 +339,7 @@ export function connectParkingWebSocket(onMessage) {
 }
 
 export async function listParkingAreas() {
-  const res = await fetch(`${API_BASE}/admin/parking-areas`);
+  const res = await fetch(`${API_BASE}/admin/parking-areas`, { headers: authHeaders() });
   return res.json();
 }
 
@@ -321,7 +352,7 @@ export async function getPublicParkingAreas() {
 export async function createParkingArea({ areaName, address, lotKey }) {
   const res = await fetch(`${API_BASE}/admin/parking-areas`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ areaName, address, lotKey }),
   });
   return res.json();
@@ -355,6 +386,7 @@ export async function predictSlotLayout(imageUri) {
   form.append('image', { uri: imageUri, name: 'layout.jpg', type: 'image/jpeg' });
   const res = await fetch(`${API_BASE}/admin/parking-areas/predict-slots`, {
     method: 'POST',
+    headers: authHeaders(),
     body: form,
   });
   return res.json();
@@ -363,7 +395,7 @@ export async function predictSlotLayout(imageUri) {
 export async function saveSlotCalibration(payload) {
   const res = await fetch(`${API_BASE}/admin/parking-areas/calibrate`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   return res.json();

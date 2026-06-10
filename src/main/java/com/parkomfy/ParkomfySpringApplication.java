@@ -2,7 +2,9 @@ package com.parkomfy;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import com.parkomfy.security.AdminAuthFilter;
 import com.parkomfy.api.*;
 import com.parkomfy.repository.*;
 import com.parkomfy.service.*;
@@ -25,11 +27,24 @@ public class ParkomfySpringApplication {
     
     @Bean
     public IParkingRepository parkingRepository() {
-        return new DatabaseManager(
-            "jdbc:mysql://localhost:3306/parkomfy",
-            "root",
-            "password"
-        );
+        String url = envOrDefault("MYSQL_URL", "jdbc:mysql://localhost:3306/parkomfy");
+        String user = envOrDefault("MYSQL_USER", "root");
+        String password = envOrDefault("MYSQL_PASSWORD", "password");
+        return new DatabaseManager(url, user, password);
+    }
+
+    @Bean
+    public FilterRegistrationBean<AdminAuthFilter> adminAuthFilter(AuthService authService) {
+        FilterRegistrationBean<AdminAuthFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new AdminAuthFilter(authService));
+        registration.addUrlPatterns("/api/v1/admin/*");
+        registration.setOrder(1);
+        return registration;
+    }
+
+    private static String envOrDefault(String key, String defaultValue) {
+        String value = System.getenv(key);
+        return (value != null && !value.isBlank()) ? value : defaultValue;
     }
     
     @Bean

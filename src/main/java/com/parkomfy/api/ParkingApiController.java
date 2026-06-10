@@ -550,6 +550,18 @@ public class ParkingApiController {
         }
     }
 
+    public ApiResponse<ExitPlateResultDto> processExitPlate(byte[] imageBytes) {
+        try {
+            ExitPlateResultDto result = plateTrackingService.processExit(imageBytes);
+            if (!result.isExited()) {
+                return ApiResponse.error("Çıkış plakası eşleşmedi veya okunamadı", 422);
+            }
+            return ApiResponse.success(result, "Araç çıkışı kaydedildi");
+        } catch (Exception e) {
+            return ApiResponse.error("Çıkış plaka işleme hatası: " + e.getMessage(), 500);
+        }
+    }
+
     public ApiResponse<ParkingScanResultDto> processParkingCameraScan(byte[] imageBytes, String areaId) {
         try {
             if (areaId == null || areaId.isBlank()) {

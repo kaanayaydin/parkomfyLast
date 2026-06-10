@@ -8,6 +8,7 @@ public class UserDto {
     private String fullName;
     private String licensePlate;
     private String role;
+    private String token;
 
     public UserDto() {}
 
@@ -29,4 +30,6 @@ public class UserDto {
     public void setLicensePlate(String licensePlate) { this.licensePlate = licensePlate; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
+    public String getToken() { return token; }
+    public void setToken(String token) { this.token = token; }
 }

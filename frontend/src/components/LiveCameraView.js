@@ -1,27 +1,66 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { getLiveCameraSnapshotUrl, getLiveCameraStatus } from '../config/api';
 
 /**
- * loop1.mp4 simülasyonu — sunucudan ~8 fps snapshot polling ile canlı görüntü.
+ * Canlı kamera: sunucudan snapshot polling.
+ * Cift-tamponlama (double buffer): alttaki katman son yuklenen kareyi gosterir,
+ * ustteki katman yeni kareyi arka planda yukler; yuklenince alta terfi eder.
+ * Boylece kareler arasi siyah titreme/takilma olmaz. Polling zincirleme:
+ * bir sonraki istek, onceki kare yuklendikten intervalMs sonra atilir -> istek
+ * yigilmaz, cihaz hizina gore akar.
  */
-const LiveCameraView = ({ height = 220, label, lotKey = 'loop1' }) => {
-  const displayLabel = label || `Canlı Kamera (${lotKey}.mp4)`;
-  const [frameKey, setFrameKey] = useState(0);
+const LiveCameraView = ({ height = 220, label, lotKey = 'loop1', intervalMs = 350 }) => {
+  const displayLabel = label || `Canlı Kamera (${lotKey})`;
+  const [baseUri, setBaseUri] = useState(null); // ekranda kalan son kare
+  const [topUri, setTopUri] = useState(null); // arka planda yuklenen yeni kare
+  const [loaded, setLoaded] = useState(false);
   const [available, setAvailable] = useState(null);
-  const intervalRef = useRef(null);
+  const [errorCount, setErrorCount] = useState(0);
+  const aliveRef = useRef(true);
+  const timerRef = useRef(null);
 
   useEffect(() => {
-    getLiveCameraStatus().then((s) => setAvailable(s.available)).catch(() => setAvailable(false));
-    intervalRef.current = setInterval(() => setFrameKey((k) => k + 1), 120);
-    return () => clearInterval(intervalRef.current);
-  }, []);
+    aliveRef.current = true;
+    setLoaded(false);
+    setErrorCount(0);
+    setBaseUri(null);
+    getLiveCameraStatus()
+      .then((s) => aliveRef.current && setAvailable(s.available))
+      .catch(() => aliveRef.current && setAvailable(false));
+    setTopUri(getLiveCameraSnapshotUrl(lotKey, Date.now()));
+    return () => {
+      aliveRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [lotKey]);
+
+  const scheduleNext = (delay) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (aliveRef.current) setTopUri(getLiveCameraSnapshotUrl(lotKey, Date.now()));
+    }, delay);
+  };
+
+  const handleTopLoad = () => {
+    if (!aliveRef.current) return;
+    setBaseUri(topUri); // yuklenen kareyi gorunur katmana terfi et
+    if (!loaded) setLoaded(true);
+    if (errorCount) setErrorCount(0);
+    scheduleNext(intervalMs);
+  };
+
+  const handleTopError = () => {
+    if (!aliveRef.current) return;
+    setErrorCount((c) => c + 1);
+    scheduleNext(Math.max(intervalMs, 500));
+  };
 
   if (available === false) {
     return (
       <View style={[styles.box, { height }]}>
         <Text style={styles.off}>Kamera simülasyonu kapalı</Text>
-        <Text style={styles.hint}>grpc_server/server.py çalıştırın (loop1.mp4)</Text>
+        <Text style={styles.hint}>grpc_server/server.py çalıştırın</Text>
       </View>
     );
   }
@@ -30,15 +69,28 @@ const LiveCameraView = ({ height = 220, label, lotKey = 'loop1' }) => {
     <View>
       <Text style={styles.label}>{displayLabel}</Text>
       <View style={[styles.box, { height }]}>
-        {available === null ? (
-          <ActivityIndicator color="#1A237E" />
-        ) : (
+        {baseUri ? (
           <Image
-            source={{ uri: getLiveCameraSnapshotUrl(lotKey, frameKey) }}
-            style={{ width: '100%', height: '100%' }}
+            source={{ uri: baseUri }}
+            style={StyleSheet.absoluteFillObject}
             resizeMode="cover"
+            fadeDuration={0}
           />
-        )}
+        ) : null}
+        {topUri ? (
+          <Image
+            source={{ uri: topUri }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode="cover"
+            fadeDuration={0}
+            onLoad={handleTopLoad}
+            onError={handleTopError}
+          />
+        ) : null}
+        {!loaded ? <ActivityIndicator color="#1A237E" /> : null}
+        {!loaded && errorCount > 0 ? (
+          <Text style={styles.errorHint}>Görüntü yüklenemiyor ({errorCount})</Text>
+        ) : null}
         <View style={styles.liveBadge}>
           <View style={styles.dot} />
           <Text style={styles.liveText}>CANLI</Text>
@@ -59,6 +111,16 @@ const styles = StyleSheet.create({
   label: { fontWeight: '600', color: '#1A237E', marginBottom: 8 },
   off: { color: '#C62828', fontWeight: 'bold' },
   hint: { color: '#888', fontSize: 12, marginTop: 6, textAlign: 'center', paddingHorizontal: 12 },
+  errorHint: {
+    position: 'absolute',
+    bottom: 12,
+    color: '#FFF',
+    backgroundColor: 'rgba(198,40,40,0.8)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    fontSize: 12,
+  },
   liveBadge: {
     position: 'absolute',
     top: 8,

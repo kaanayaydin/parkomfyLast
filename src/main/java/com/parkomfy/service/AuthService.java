@@ -5,14 +5,21 @@ import com.parkomfy.api.RegisterRequest;
 import com.parkomfy.api.UserDto;
 import com.parkomfy.model.User;
 import com.parkomfy.repository.IParkingRepository;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AuthService {
 
+    private static final BCryptPasswordEncoder ENCODER = new BCryptPasswordEncoder();
+
     private final IParkingRepository repository;
+    private final Map<String, AuthToken> tokens = new ConcurrentHashMap<>();
 
     public AuthService(IParkingRepository repository) {
         this.repository = repository;
@@ -56,13 +63,50 @@ public class AuthService {
         if (user == null || user.getPasswordHash() == null) {
             throw new IllegalArgumentException("E-posta veya şifre hatalı");
         }
-        if (!user.getPasswordHash().equals(hashPassword(request.getPassword()))) {
+        if (!verifyPassword(request.getPassword(), user.getPasswordHash())) {
             throw new IllegalArgumentException("E-posta veya şifre hatalı");
         }
-        return new UserDto(user);
+
+        UserDto dto = new UserDto(user);
+        String token = issueToken(user);
+        dto.setToken(token);
+        return dto;
+    }
+
+    public boolean validateAdminToken(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        AuthToken auth = tokens.get(token.trim());
+        return auth != null && "ADMIN".equalsIgnoreCase(auth.role);
     }
 
     public static String hashPassword(String password) {
+        return ENCODER.encode(password);
+    }
+
+    public static boolean verifyPassword(String rawPassword, String storedHash) {
+        if (rawPassword == null || storedHash == null) {
+            return false;
+        }
+        if (storedHash.startsWith("$2a$") || storedHash.startsWith("$2b$") || storedHash.startsWith("$2y$")) {
+            return ENCODER.matches(rawPassword, storedHash);
+        }
+        return storedHash.equals(legacySha256(rawPassword));
+    }
+
+    public static String defaultAdminPassword() {
+        String env = System.getenv("PARKOMFY_ADMIN_PASSWORD");
+        return (env != null && !env.isBlank()) ? env : "1234";
+    }
+
+    private String issueToken(User user) {
+        String token = UUID.randomUUID().toString();
+        tokens.put(token, new AuthToken(user.getUserId(), user.getRole()));
+        return token;
+    }
+
+    private static String legacySha256(String password) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] bytes = md.digest(password.getBytes(StandardCharsets.UTF_8));
@@ -82,5 +126,15 @@ public class AuthService {
 
     private static boolean isBlank(String s) {
         return s == null || s.trim().isEmpty();
+    }
+
+    static final class AuthToken {
+        final String userId;
+        final String role;
+
+        AuthToken(String userId, String role) {
+            this.userId = userId;
+            this.role = role;
+        }
     }
 }

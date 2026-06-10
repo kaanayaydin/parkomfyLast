@@ -428,6 +428,24 @@ public class ParkingRestController {
         }
     }
 
+    /**
+     * POST /api/v1/exit/plate
+     * Exit barrier LPR: match LEAVING/ACTIVE session and complete exit.
+     */
+    @PostMapping("/exit/plate")
+    public ResponseEntity<ApiResponse<ExitPlateResultDto>> processExitPlate(
+            @RequestParam("image") MultipartFile image) {
+        if (image.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponse.error("image required", 400));
+        }
+        try {
+            ApiResponse<ExitPlateResultDto> response = apiController.processExitPlate(image.getBytes());
+            return ResponseEntity.status(response.getStatusCode()).body(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage(), 500));
+        }
+    }
+
     @PostMapping("/parking/camera/scan")
     public ResponseEntity<ApiResponse<ParkingScanResultDto>> processParkingCameraScan(
             @RequestParam("image") MultipartFile image,

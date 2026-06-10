@@ -1275,13 +1275,25 @@ class YOLODetectionServicer(detection_pb2_grpc.YOLODetectionServiceServicer):
                 confidence=0.0,
             )
         bgr, _, _ = cv_engine._decode_image(image_data)
-        plate_text = plate_reader.process_and_read(bgr, slot_label)
-        confidence = plate_reader.plate_confidence(plate_text)
+        result = plate_reader.process_and_read_detailed(bgr, slot_label)
+        plate_text = result.get("text", "TESPIT EDILEMEDI")
+        confidence = float(result.get("confidence", 0.0))
+        loc = result.get("location")
+        plate_loc = None
+        if loc and len(loc) == 4:
+            plate_loc = detection_pb2.BoundingBox(
+                x=float(loc[0]), y=float(loc[1]),
+                width=float(loc[2]), height=float(loc[3]),
+                class_name="plate", confidence=confidence,
+            )
         logger.info("DetectLicensePlate camera_id=%s -> %s (%.2f)", camera_id, plate_text, confidence)
-        return detection_pb2.LicensePlateResponse(
+        resp = detection_pb2.LicensePlateResponse(
             license_plate_text=plate_text,
             confidence=confidence,
         )
+        if plate_loc is not None:
+            resp.plate_location.CopyFrom(plate_loc)
+        return resp
 
     def DetectParkingSlots(self, request, context):
         logger.info("DetectParkingSlots isteği alındı")

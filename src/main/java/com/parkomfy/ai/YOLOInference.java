@@ -198,6 +198,29 @@ public class YOLOInference implements IYOLOInference {
     }
 
     @Override
+    public PlateRead readPlateFromCrop(byte[] vehicleCropJpeg, int slotNumber) {
+        if (vehicleCropJpeg == null || vehicleCropJpeg.length < 50) {
+            return new PlateRead(null, 0.0);
+        }
+        LicensePlateRequest request = LicensePlateRequest.newBuilder()
+                .setCameraId("slot-" + slotNumber)
+                .setImageData(ByteString.copyFrom(vehicleCropJpeg))
+                .build();
+        try {
+            LicensePlateResponse response = blockingStub
+                    .withDeadlineAfter(GRPC_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .detectLicensePlate(request);
+            String text = response.getLicensePlateText();
+            if (text == null || text.isBlank()) {
+                return new PlateRead(null, 0.0);
+            }
+            return new PlateRead(text.trim(), response.getConfidence());
+        } catch (Exception e) {
+            return new PlateRead(null, 0.0);
+        }
+    }
+
+    @Override
     public byte[] getParkingSlotsAnnotatedImage(byte[] imageData) {
         return getParkingSlotsAnnotatedImage(imageData, "");
     }

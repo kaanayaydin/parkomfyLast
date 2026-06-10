@@ -2,6 +2,7 @@ package com.parkomfy.service;
 
 import com.parkomfy.ai.IYOLOInference;
 import com.parkomfy.api.EntrancePlateResultDto;
+import com.parkomfy.api.ExitPlateResultDto;
 import com.parkomfy.api.LiveParkingStatusDto;
 import com.parkomfy.api.ParkingScanResultDto;
 import com.parkomfy.api.SlotPlateMatchDto;
@@ -122,11 +123,7 @@ public class PlateTrackingService {
             ParkingSlot dbSlot = dbSlots.get(i);
             if (!det.isOccupied() || det.getConfidence() < MIN_DETECTION_CONFIDENCE) {
                 if (!det.isOccupied() && dbSlot.getStatus() == ParkingSlot.SlotStatus.OCCUPIED) {
-                    ParkingSession session = repository.getActiveSessionForSlot(dbSlot.getSlotId());
-                    if (session == null) {
-                        dbSlot.vacate();
-                        repository.updateSlot(dbSlot);
-                    }
+                    handleSlotBecameEmpty(dbSlot);
                 }
                 continue;
             }
@@ -218,28 +215,109 @@ public class PlateTrackingService {
         return null;
     }
 
+    /**
+     * Overhead camera: match OCR against vehicles that entered but are not yet parked.
+     */
     private Vehicle findBestVehicleMatch(String detectedPlate) {
-        Vehicle best = null;
-        double bestScore = 0;
+        List<Vehicle> enteredNotParked = new ArrayList<>();
         for (Vehicle v : repository.getRecentEnteredVehicles()) {
             if (v.getLicensePlate() == null) continue;
-            double score = PlateMatcher.similarity(detectedPlate, v.getLicensePlate().getPlateNumber());
-            if (score > bestScore && score >= PLATE_MATCH_THRESHOLD) {
-                bestScore = score;
-                best = v;
-            }
+            String norm = PlateMatcher.normalize(v.getLicensePlate().getPlateNumber());
+            if (repository.getActiveSessionByPlate(norm) != null) continue;
+            enteredNotParked.add(v);
         }
-        if (best != null) return best;
+        PlateMatcher.MatchResult<Vehicle> match = PlateMatcher.findBestMatch(
+            detectedPlate,
+            enteredNotParked,
+            v -> v.getLicensePlate().getPlateNumber(),
+            PLATE_MATCH_THRESHOLD);
+        return match != null ? match.getItem() : null;
+    }
 
-        for (ParkingSession s : repository.getActiveSessions()) {
-            if (s.getVehicle() == null || s.getVehicle().getLicensePlate() == null) continue;
-            double score = PlateMatcher.similarity(detectedPlate, s.getVehicle().getLicensePlate().getPlateNumber());
-            if (score > bestScore && score >= PLATE_MATCH_THRESHOLD) {
-                bestScore = score;
-                best = s.getVehicle();
+    private void handleSlotBecameEmpty(ParkingSlot dbSlot) {
+        ParkingSession session = repository.getActiveSessionForSlot(dbSlot.getSlotId());
+        if (session != null) {
+            session.setStatus(ParkingSession.SessionStatus.LEAVING);
+            repository.updateSession(session);
+            dbSlot.vacate();
+            repository.updateSlot(dbSlot);
+            if (session.getVehicle() != null && session.getVehicle().getLicensePlate() != null) {
+                notificationService.sendToPlate(
+                    session.getVehicle().getLicensePlate().getPlateNumber(),
+                    "Çıkış yönünde",
+                    "Slot terk edildi — çıkış bariyerine yönlendiriliyor.");
+            }
+        } else {
+            dbSlot.vacate();
+            repository.updateSlot(dbSlot);
+        }
+    }
+
+    public ExitPlateResultDto processExit(byte[] imageBytes) {
+        Camera camera = new Camera("EXIT-1", "Çıkış Kamerası", Camera.CameraType.ENTRANCE_LPR, "Exit");
+        camera.setCurrentFrame(imageBytes);
+        DetectionResult result = detectionService.detectLicensePlate(camera);
+
+        ExitPlateResultDto dto = new ExitPlateResultDto();
+        dto.setExited(false);
+        if (result.getLicensePlateText() == null || result.getLicensePlateText().isBlank()
+                || result.getLicensePlateText().toUpperCase().contains("TESPIT")) {
+            dto.setConfidence(result.getConfidence());
+            return dto;
+        }
+
+        String plate = result.getLicensePlateText().trim();
+        String normalized = PlateMatcher.normalize(plate);
+        dto.setLicensePlate(plate);
+        dto.setNormalizedPlate(normalized);
+        dto.setConfidence(result.getConfidence());
+
+        ParkingSession session = repository.getLeavingOrActiveSessionByPlate(normalized);
+        if (session == null) {
+            PlateMatcher.MatchResult<ParkingSession> fuzzy = PlateMatcher.findBestMatch(
+                normalized,
+                repository.getLeavingSessions(),
+                s -> s.getVehicle() != null && s.getVehicle().getLicensePlate() != null
+                    ? s.getVehicle().getLicensePlate().getPlateNumber() : "",
+                PLATE_MATCH_THRESHOLD);
+            if (fuzzy != null) {
+                session = fuzzy.getItem();
             }
         }
-        return best;
+        if (session == null) {
+            return dto;
+        }
+
+        session.complete();
+        repository.updateSession(session);
+        Vehicle vehicle = session.getVehicle();
+        if (vehicle != null) {
+            vehicle.setExitTime(LocalDateTime.now());
+            repository.saveVehicle(vehicle);
+        }
+
+        dto.setSessionId(session.getSessionId());
+        dto.setSlotId(session.getParkingSlot() != null ? session.getParkingSlot().getSlotId() : null);
+        dto.setExited(true);
+
+        notificationService.sendToPlate(plate, "Çıkış onaylandı", "İyi yolculuklar!");
+        LiveParkingStatusDto live = liveParkingService.getLiveStatus(
+            session.getParkingSlot() != null ? resolveAreaFromSlot(session.getParkingSlot().getSlotId()) : null,
+            null, null);
+        if (live != null) {
+            broadcaster.broadcastLiveStatus(live);
+        }
+        return dto;
+    }
+
+    private String resolveAreaFromSlot(String slotId) {
+        if (slotId == null) return null;
+        for (ParkingArea area : repository.getAllAreas()) {
+            if (area.getSlotById(slotId) != null) {
+                return area.getAreaId();
+            }
+        }
+        return null;
     }
 
     private byte[] tryGetAnnotatedImage(byte[] imageBytes) {
